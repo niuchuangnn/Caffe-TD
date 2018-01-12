@@ -1,0 +1,15 @@
+train_net: "vgg16_ssd_seg_noclass_extra3_3.prototxt"
+base_lr: 0.01
+lr_policy: "step"
+gamma: 0.1
+stepsize: 15000
+iter_size: 2
+display: 1
+max_iter: 30000
+momentum: 0.9
+weight_decay: 0.0005
+#test_interval: 500
+#test_iter: 1000
+snapshot: 1000
+snapshot_prefix: "/media/amax/data2/ssd_seg/vgg16_noclass_extra3_3"
+solver_mode: GPU
