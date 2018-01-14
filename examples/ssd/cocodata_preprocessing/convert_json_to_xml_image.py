@@ -124,6 +124,7 @@ if __name__ == '__main__':
     # dataType = 'val2014'
     dataDir = '/media/amax/data2/MSCOCO/MS_COCO_2017/'
     dataType = 'val2017'
+    is_filter = False
 
     annFile = '{}/annotations/instances_{}.json'.format(dataDir, dataType)
 
@@ -169,11 +170,12 @@ if __name__ == '__main__':
             plt.imshow(I)
             plt.show()
 
-        if len(anns) == 0:
-            continue
+        if is_filter:
+            if len(anns) == 0:
+                continue
 
-        if len(I.shape) == 2:
-            continue
+            if len(I.shape) == 2:
+                continue
 
         CreateImgXMLFileMask(anns, im_name, I.shape, f, xml_folder, dataType, instance_folder, id_to_id)
 

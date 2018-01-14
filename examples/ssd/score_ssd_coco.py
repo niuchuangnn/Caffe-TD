@@ -80,9 +80,9 @@ run_soon = True
 # train_data = "examples/coco/coco_train_lmdb"
 # # The database file for testing data. Created by data/coco/create_data.sh
 # test_data = "examples/coco/coco_minival_lmdb"
-train_data = "/media/amax/data2/MSCOCO/lmdb/coco2014_train_object_mask_lmdb"
+train_data = "/media/amax/data2/MSCOCO/MS_COCO_2017/lmdb/coco2017_train_object_mask_lmdb"
 # The database file for testing data. Created by data/coco/create_data.sh
-test_data = "/media/amax/data2/MSCOCO/lmdb/coco2014_val_object_mask_lmdb"
+test_data = "/media/amax/data2/MSCOCO/MS_COCO_2017/lmdb/coco2017_val_object_mask_lmdb"
 # Specify the batch sampler.
 resize_width = 320
 resize_height = 320
@@ -275,7 +275,7 @@ if max_iter == 0:
 
 # Stores the test image names and sizes. Created by data/coco/create_list.sh
 # name_size_file = "data/coco/minival2014_name_size.txt"
-name_size_file = "data/coco/val2014_name_size.txt"
+name_size_file = "data/coco/val2017_name_size.txt"
 # The resume model.
 pretrain_model = "{}_iter_{}.caffemodel".format(snapshot_prefix, max_iter)
 # Stores LabelMapItem.
@@ -348,7 +348,7 @@ clip = False
 
 # Solver parameters.
 # Defining which GPUs to use.
-gpus = "3"
+gpus = "0"
 gpulist = gpus.split(",")
 num_gpus = len(gpulist)
 
@@ -413,7 +413,7 @@ det_out_param = {
     'nms_param': {'nms_threshold': 0.45, 'top_k': 400},
     'save_output_param': {
         'output_directory': output_result_dir,
-        'output_name_prefix': "detections_minival_ssd320_results",
+        'output_name_prefix': "detections_val2017_ssd320_results",
         'output_format': "COCO",
         'label_map_file': label_map_file,
         'name_size_file': name_size_file,

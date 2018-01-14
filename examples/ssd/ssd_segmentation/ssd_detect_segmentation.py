@@ -421,18 +421,18 @@ def main(args):
 def parse_args():
     '''parse args'''
     parser = argparse.ArgumentParser()
-    parser.add_argument('--gpu_id', type=int, default=1, help='gpu id')
+    parser.add_argument('--gpu_id', type=int, default=0, help='gpu id')
     parser.add_argument('--bbox_margin', type=int, default=5, help='bbox margin')
     parser.add_argument('--thresh', type=float, default=0.2, help='thresh')
     parser.add_argument('--labelmap_file',
                         default='data/VOC0712/labelmap_voc.prototxt')
     parser.add_argument('--model_def',
-                        default='examples/ssd/ssd_segmentation/deploy_noclass.prototxt')
+                        default='examples/ssd/ssd_segmentation/deploy_noclass_extra3_3.prototxt')
     parser.add_argument('--image_resize', default=320, type=int)
     parser.add_argument('--model_weights_detection',
                         default='/media/amax/data2/ssd/SSD_320x320/VGG_VOC0712_SSD_320x320_iter_120000.caffemodel')
     parser.add_argument('--model_weights_segmentation',
-                        default='/media/amax/data2/ssd_seg/vgg16_5_noclass_iter_24000.caffemodel')
+                        default='/media/amax/data2/ssd_seg/vgg16_noclass_extra3_3_iter_15000.caffemodel')
     parser.add_argument('--image_file', default='/home/amax/NiuChuang/data/VOCdevkit/VOC2012/JPEGImages/2009_002894.jpg')
     parser.add_argument('--test_file', default='/home/amax/NiuChuang/fcn.berkeleyvision.org/data/pascal/2012/VOCdevkit/VOC2012/ImageSets/Segmentation/val.txt')
     parser.add_argument('--image_folder', default='/home/amax/NiuChuang/data/VOCdevkit/VOC2012/JPEGImages/')
