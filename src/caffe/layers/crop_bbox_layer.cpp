@@ -28,6 +28,11 @@ namespace caffe {
     void CropBBoxLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
                                    const vector<Blob<Dtype>*>& top) {
         vector<int> bottom_shape = bottom[0]->shape();
+        if (this->phase_==TEST) {
+            CHECK_EQ(bottom_shape[0], 1) << "Current version only support 1 image in test stage!";
+            int num_bbox = bottom[1]->height();
+            bottom_shape[0] = num_bbox;
+        }
         top[0]->Reshape(bottom_shape);
         mask_crop_.Reshape(bottom_shape);
     }
@@ -50,7 +55,10 @@ namespace caffe {
     template <typename Dtype>
     void CropBBoxLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
                                        const vector<Blob<Dtype>*>& top) {
-        vector<int> top_shape = bottom[0]->shape();
+//        vector<int> bottom_shape = bottom[0]->shape();
+//        std::cout << "bottom shape: " << bottom_shape[0] << " " << bottom_shape[1] << " " << bottom_shape[2] << " " << bottom_shape[3] << std::endl;
+//    	std::cout << "cpu" << std::endl;
+        vector<int> top_shape = top[0]->shape();
         const Dtype* gt_data = bottom[1]->cpu_data();
         num_gt_ = bottom[1]->height();
 
@@ -67,7 +75,10 @@ namespace caffe {
         }
 
 //        CHECK_GT(num_output_, 0) << "num_output_ should be larger than 0.";
-        CHECK_LE(num_class_, num_img_) << "Current version only support one class at most selected for each image.";
+
+        if (this->phase_ == TRAIN) {
+            CHECK_LE(num_class_, num_img_) << "Current version only support one class at most selected for each image at train stage.";
+        }
 
 //        top_shape[0] = num_output_;
 //        top[0]->Reshape(top_shape);
@@ -111,53 +122,103 @@ namespace caffe {
 //            }
 //        }
 
-        // compute corp mask
-        caffe_set(mask_crop_.count(), Dtype(0), mask_crop_.mutable_cpu_data());
-        map<int, LabelBBox>::const_iterator iter_im;
-        for (iter_im = all_gt_boxes_.begin(); iter_im != all_gt_boxes_.end(); ++iter_im){
-            img_id = iter_im->first;
-            CHECK(img_id >=0 && img_id < num_img_) << "img_id must be less than the number of images.";
-            LabelBBox::iterator it;
-            label_indices.clear();
-            for (it = all_gt_boxes_[img_id].begin(); it != all_gt_boxes_[img_id].end(); it++){
-                label_indices.push_back(it->first);
-            }
-            int num_class_i = label_indices.size();
-            for (int l = 0; l < num_class_i; ++l){
-                label = label_indices[l];
-                vector<NormalizedBBox> bboxes = all_gt_boxes_[img_id][label];
-                for (int b = 0; b < bboxes.size(); ++b){
-                    xmin_norm = bboxes[b].xmin();
-                    ymin_norm = bboxes[b].ymin();
-                    xmax_norm = bboxes[b].xmax();
-                    ymax_norm = bboxes[b].ymax();
+        if (this->phase_ == TRAIN) {
+            // compute corp mask
+            caffe_set(mask_crop_.count(), Dtype(0), mask_crop_.mutable_cpu_data());
+            map<int, LabelBBox>::const_iterator iter_im;
+            for (iter_im = all_gt_boxes_.begin(); iter_im != all_gt_boxes_.end(); ++iter_im) {
+                img_id = iter_im->first;
+                CHECK(img_id >= 0 && img_id < num_img_) << "img_id must be less than the number of images.";
+                LabelBBox::iterator it;
+                label_indices.clear();
+                for (it = all_gt_boxes_[img_id].begin(); it != all_gt_boxes_[img_id].end(); it++) {
+                    label_indices.push_back(it->first);
+                }
+                int num_class_i = label_indices.size();
+                for (int l = 0; l < num_class_i; ++l) {
+                    label = label_indices[l];
+                    vector<NormalizedBBox> bboxes = all_gt_boxes_[img_id][label];
+                    for (int b = 0; b < bboxes.size(); ++b) {
+                        xmin_norm = bboxes[b].xmin();
+                        ymin_norm = bboxes[b].ymin();
+                        xmax_norm = bboxes[b].xmax();
+                        ymax_norm = bboxes[b].ymax();
 
-                    xmin = static_cast<int>(floor(xmin_norm * static_cast<Dtype>(width)));
-                    ymin = static_cast<int>(floor(ymin_norm * static_cast<Dtype>(height)));
-                    xmax = static_cast<int>(ceil(xmax_norm * static_cast<Dtype>(width)));
-                    ymax = static_cast<int>(ceil(ymax_norm * static_cast<Dtype>(height)));
+                        xmin = static_cast<int>(floor(xmin_norm * static_cast<Dtype>(width)));
+                        ymin = static_cast<int>(floor(ymin_norm * static_cast<Dtype>(height)));
+                        xmax = static_cast<int>(ceil(xmax_norm * static_cast<Dtype>(width)));
+                        ymax = static_cast<int>(ceil(ymax_norm * static_cast<Dtype>(height)));
 
-                    xmin = std::max(0, xmin);
-                    ymin = std::max(0, ymin);
-                    xmax = std::min(xmax, width);
-                    ymax = std::min(ymax, height);
+                        xmin = std::max(0, xmin);
+                        ymin = std::max(0, ymin);
+                        xmax = std::min(xmax, width);
+                        ymax = std::min(ymax, height);
 
-                    for (int c = 0; c < channels; ++c) {
-                        for (int h = ymin; h < ymax; ++h) {
-                            for (int w = xmin; w < xmax; ++w) {
+                        for (int c = 0; c < channels; ++c) {
+                            for (int h = ymin; h < ymax; ++h) {
+                                for (int w = xmin; w < xmax; ++w) {
 
-                                mask_data[img_id*inner_dim + c*height*width + h*width + w] = 1;
+                                    mask_data[img_id * inner_dim + c * height * width + h * width + w] = 1;
+                                }
                             }
                         }
-                    }
 
+                    }
+                }
+            }
+
+            // crop the bottom data to top blob with crop mask.
+            caffe_mul(top[0]->count(), bottom_data, mask_crop_.cpu_data(), top_data);
+        } else {
+            // compute output at test stage.
+            caffe_set(mask_crop_.count(), Dtype(0), mask_crop_.mutable_cpu_data());
+            map<int, LabelBBox>::const_iterator iter_im;
+            int bbox_i = 0;
+            for (iter_im = all_gt_boxes_.begin(); iter_im != all_gt_boxes_.end(); ++iter_im) {
+                img_id = iter_im->first;
+                CHECK(img_id >= 0 && img_id < num_img_) << "img_id must be less than the number of images.";
+                LabelBBox::iterator it;
+                label_indices.clear();
+                for (it = all_gt_boxes_[img_id].begin(); it != all_gt_boxes_[img_id].end(); it++) {
+                    label_indices.push_back(it->first);
+                }
+                int num_class_i = label_indices.size();
+                for (int l = 0; l < num_class_i; ++l) {
+                    label = label_indices[l];
+                    vector<NormalizedBBox> bboxes = all_gt_boxes_[img_id][label];
+                    for (int b = 0; b < bboxes.size(); ++b) {
+                        xmin_norm = bboxes[b].xmin();
+                        ymin_norm = bboxes[b].ymin();
+                        xmax_norm = bboxes[b].xmax();
+                        ymax_norm = bboxes[b].ymax();
+
+                        xmin = static_cast<int>(floor(xmin_norm * static_cast<Dtype>(width)));
+                        ymin = static_cast<int>(floor(ymin_norm * static_cast<Dtype>(height)));
+                        xmax = static_cast<int>(ceil(xmax_norm * static_cast<Dtype>(width)));
+                        ymax = static_cast<int>(ceil(ymax_norm * static_cast<Dtype>(height)));
+
+                        xmin = std::max(0, xmin);
+                        ymin = std::max(0, ymin);
+                        xmax = std::min(xmax, width);
+                        ymax = std::min(ymax, height);
+
+                        CHECK_LT(bbox_i, num_gt_) << "bbox_i must less than the number of bbox.";
+                        for (int c = 0; c < channels; ++c) {
+                            for (int h = ymin; h < ymax; ++h) {
+                                for (int w = xmin; w < xmax; ++w) {
+
+                                    top_data[bbox_i * inner_dim + c * height * width + h * width + w] = bottom_data[0 * inner_dim + c * height * width + h * width + w];
+                                }
+                            }
+                        }
+                        bbox_i += 1;
+
+                    }
                 }
             }
         }
 
-        // crop the bottom data to top blob with crop mask.
-        caffe_mul(top[0]->count(), bottom_data, mask_crop_.cpu_data(), top_data);
-
+//        std::cout << "output shape: " << top_shape[0] << " " << top_shape[1] << " " << top_shape[2] << " " << top_shape[3] << std::endl;
     }
 
     template <typename Dtype>

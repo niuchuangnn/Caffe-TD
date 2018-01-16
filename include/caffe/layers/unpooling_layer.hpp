@@ -51,6 +51,7 @@ protected:
     int channels_;
     int height_, width_;
     int unpooled_height_, unpooled_width_;
+    Blob<Dtype> mask_extend_;
 };
 
 }  // namespace caffe

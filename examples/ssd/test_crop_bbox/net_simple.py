@@ -24,7 +24,9 @@ net_def = "test_crop_bbox_simple.prototxt"
 with open(net_def, 'w') as f:
     f.write(str(n.to_proto()))
 
-net = caffe.Net(net_def, caffe.TEST)
+caffe.set_device(0)
+caffe.set_mode_gpu()
+net = caffe.Net(net_def, caffe.TRAIN)
 
 img_labels = [[1], [2]]
 

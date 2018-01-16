@@ -432,7 +432,7 @@ def parse_args():
     parser.add_argument('--model_weights_detection',
                         default='/media/amax/data2/ssd/SSD_320x320/VGG_VOC0712_SSD_320x320_iter_120000.caffemodel')
     parser.add_argument('--model_weights_segmentation',
-                        default='/media/amax/data2/ssd_seg/vgg16_noclass_extra3_3_iter_15000.caffemodel')
+                        default='/media/amax/data2/ssd_seg/vgg16_noclass_extra3_3_iter_30000.caffemodel')
     parser.add_argument('--image_file', default='/home/amax/NiuChuang/data/VOCdevkit/VOC2012/JPEGImages/2009_002894.jpg')
     parser.add_argument('--test_file', default='/home/amax/NiuChuang/fcn.berkeleyvision.org/data/pascal/2012/VOCdevkit/VOC2012/ImageSets/Segmentation/val.txt')
     parser.add_argument('--image_folder', default='/home/amax/NiuChuang/data/VOCdevkit/VOC2012/JPEGImages/')

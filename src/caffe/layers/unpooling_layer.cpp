@@ -117,6 +117,8 @@ namespace caffe {
         // We'll get the mask from bottom[1] if it's of size >1.
         const bool use_bottom_mask = bottom.size() > 1;
         const Dtype* bottom_mask = NULL;
+        vector<int> mask_shape = bottom[1]->shape();
+        vector<int> bottom_shape = bottom[0]->shape();
         // Different unpooling methods. We explicitly do the switch outside the for
         // loop to save time, although this results in more code.
         switch (this->layer_param_.unpooling_param().unpool()) {
@@ -125,10 +127,29 @@ namespace caffe {
                 // Initialize
                 if (use_bottom_mask) {
                     bottom_mask = bottom[1]->cpu_data();
+                    CHECK_EQ(mask_shape[1], bottom_shape[1]) << "data channel must equal to mask channel";
+                    CHECK_EQ(mask_shape[2], bottom_shape[2]) << "data height must equal to mask height";
+                    CHECK_EQ(mask_shape[3], bottom_shape[3]) << "data width must equal to mask width";
+                    if (mask_shape[0] != bottom_shape[0]){
+                        CHECK_EQ(mask_shape[0], 1) << "Current version supports 1 image per batch at test stage.";
+//                        mask_extend_.Reshape(bottom_shape);
+//                        int dim = mask_extend_.channels()*mask_extend_.height()*mask_extend_.width();
+//                        for (int i = 0; i < bottom_shape[0]; ++i){
+//                            caffe_copy(dim, bottom[1]->cpu_data(), mask_extend_.mutable_cpu_data()+i*dim);
+//                        }
+//                        bottom_mask = mask_extend_.cpu_data();
+                    }
+//                    else {
+//                        bottom_mask = bottom[1]->cpu_data();
+//                    }
+
                 }
                 // The main loop
                 for (int n = 0; n < bottom[0]->num(); ++n) {
                     for (int c = 0; c < channels_; ++c) {
+                        if (bottom_shape[0] != mask_shape[0]){
+                            bottom_mask = bottom[1]->cpu_data() + c * bottom_shape[2] * bottom_shape[3];
+                        }
                         for (int ph = 0; ph < height_; ++ph) {
                             for (int pw = 0; pw < width_; ++pw) {
                                 int uph = max(0,min(ph * stride_h_ - pad_h_, unpooled_height_-1));
@@ -147,7 +168,9 @@ namespace caffe {
                         bottom_data += bottom[0]->offset(0, 1);
                         top_data += top[0]->offset(0, 1);
                         if (use_bottom_mask) {
-                            bottom_mask += bottom[1]->offset(0, 1);
+                            if (mask_shape[0] == bottom_shape[0]){
+                                bottom_mask += bottom[1]->offset(0, 1);
+                            }
                         }
                     }
                 }
