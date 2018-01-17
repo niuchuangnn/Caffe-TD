@@ -41,7 +41,7 @@ def vis_square(data, padsize=1, padval=0):
 
 
 if __name__ == "__main__":
-    caffe.set_device(1)
+    caffe.set_device(0)
     caffe.set_mode_gpu()
 
     solver_proto = 'models/VGGNet/VOC0712/test/solver.prototxt'

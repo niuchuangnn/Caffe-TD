@@ -710,8 +710,11 @@ def DeVGGNetBody(net, from_layer, need_fc=True, fully_conv=False, reduced=False,
             #                                 convolution_param=dict(num_output=num_output,kernel_size=1, **dekwargs), **deparam)
             # else:
             
-            net.fc7_crop = L.CropBBox(net.fc7, net[bbox])
-            net.defc7_concat = L.Concat(net.fc7_crop, net[from_layer])
+            if "fc7" in extra_crop_layers:
+                net.fc7_crop = L.CropBBox(net.fc7, net[bbox])
+                net.defc7_concat = L.Concat(net.fc7_crop, net[from_layer])
+            else:
+                net.defc7_concat = L.Concat(net.fc7, net[from_layer])
             
             net.defc7 = L.Deconvolution(net.defc7_concat, 
                                         convolution_param=dict(num_output=num_output, kernel_size=1, **dekwargs), **deparam)
@@ -788,9 +791,11 @@ def DeVGGNetBody(net, from_layer, need_fc=True, fully_conv=False, reduced=False,
             else:
                 net[name] = L.Unpooling(net.derelu5_1, unpool=P.Unpooling.MAX, 
                                         kernel_size=2, stride=2, unpool_size=40)
-    
-    net.conv4_3_crop = L.CropBBox(net.conv4_3, net[bbox])
-    net.deconv4_3_concat = L.Concat(net.conv4_3_crop, net[name])
+    if "conv4_3" in extra_crop_layers:
+        net.conv4_3_crop = L.CropBBox(net.conv4_3, net[bbox])
+        net.deconv4_3_concat = L.Concat(net.conv4_3_crop, net[name])
+    else:
+        net.deconv4_3_concat = L.Concat(net.conv4_3, net[name])
     
     net.deconv4_3 = L.Deconvolution(net.deconv4_3_concat, convolution_param=dict(num_output=512, pad=1, kernel_size=3, **dekwargs), **deparam)
     net.derelu4_3 = L.ReLU(net.deconv4_3, in_place=True)

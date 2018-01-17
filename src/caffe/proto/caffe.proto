@@ -825,6 +825,7 @@ message CropBBoxParameter {
   // If ture, the object class, class specific bboxes and class specific object mask will be randomly selected.
   optional int32 background_label_id = 1 [default = 0];
   optional bool use_difficult_gt = 2 [default = true];
+  optional bool is_crop_score_map = 3 [default = false];
 }
 
 message UnpoolingParameter {
