@@ -83,18 +83,18 @@ class DataTransformer {
 
     void Transform(const BBoxSegDatum& bbox_seg_datum,
                    Blob<Dtype>* transformed_img, Blob<Dtype>* transformed_seg,
-                   RepeatedPtrField<AnnotationGroup>* transformed_anno_vec);
+                   RepeatedPtrField<AnnotationGroup>* transformed_anno_vec, bool is_output_instance_mask);
     void Transform(const BBoxSegDatum& bbox_seg_datum,
                    Blob<Dtype>* transformed_blob, Blob<Dtype>* transformed_seg,
                    RepeatedPtrField<AnnotationGroup>* transformed_anno_vec,
-                   bool* do_mirror);
+                   bool* do_mirror, bool is_output_instance_mask);
     void Transform(const BBoxSegDatum& bbox_seg_datum,
                    Blob<Dtype>* transformed_img, Blob<Dtype>* transformed_seg,
                    vector<AnnotationGroup>* transformed_anno_vec,
-                   bool* do_mirror);
+                   bool* do_mirror, bool is_output_instance_mask);
     void Transform(const BBoxSegDatum& bbox_seg_datum,
                    Blob<Dtype>* transformed_img, Blob<Dtype>* transformed_seg,
-                   vector<AnnotationGroup>* transformed_anno_vec);
+                   vector<AnnotationGroup>* transformed_anno_vec, bool is_output_instance_mask);
 
   /**
    * @brief Transform the annotation according to the transformation applied
@@ -119,6 +119,18 @@ class DataTransformer {
           const BBoxSegDatum& bbox_seg_datum, const bool do_resize,
           const NormalizedBBox& crop_bbox, const bool do_mirror,
           RepeatedPtrField<AnnotationGroup>* transformed_anno_group_all);
+  void TransformMaskAnnotation(
+          const BBoxSegDatum& bbox_seg_datum, const bool do_resize,
+          const NormalizedBBox& crop_bbox, const bool do_mirror, const float expand_ratio,
+          RepeatedPtrField<AnnotationGroup>* transformed_anno_group_all);
+  void TransformCropMaskAnnotation(
+          const BBoxSegDatum& bbox_seg_datum, const bool do_resize,
+          const NormalizedBBox& crop_bbox, const bool do_mirror,
+          RepeatedPtrField<AnnotationGroup>* transformed_anno_group_all);
+  void TransformResizeMaskAnnotation(
+          const BBoxSegDatum& bbox_seg_datum, const bool do_resize,
+          const NormalizedBBox& crop_bbox, const bool do_mirror,
+          RepeatedPtrField<AnnotationGroup>* transformed_anno_group_all);
   /**
    * @brief Crops the datum according to bbox.
    */
@@ -134,7 +146,7 @@ class DataTransformer {
   void CropImage(const AnnotatedDatum& anno_datum, const NormalizedBBox& bbox,
                  AnnotatedDatum* cropped_anno_datum);
   void CropImageSeg(const BBoxSegDatum& bbox_seg_datum, const NormalizedBBox& bbox,
-                 BBoxSegDatum* cropped_bbox_seg_datum);
+                 BBoxSegDatum* cropped_bbox_seg_datum, bool is_output_instance_mask);
 
   /**
    * @brief Expand the datum.
@@ -150,7 +162,7 @@ class DataTransformer {
   void ExpandImage(const AnnotatedDatum& anno_datum,
                    AnnotatedDatum* expanded_anno_datum);
   void ExpandImage(const BBoxSegDatum& bbox_seg_datum,
-                   BBoxSegDatum* expanded_bbox_seg_datum);
+                   BBoxSegDatum* expanded_bbox_seg_datum, bool is_output_instance_mask);
 
   /**
    * @brief Apply distortion to the datum.
@@ -287,7 +299,7 @@ class DataTransformer {
   void Transform(const Datum& datum, Blob<Dtype>* transformed_blob,
                  NormalizedBBox* crop_bbox, bool* do_mirror);
   void Transform(const SegDatum& seg_datum, Blob<Dtype>* transformed_img, Blob<Dtype>* transformed_seg,
-                 NormalizedBBox* crop_bbox, bool* do_mirror);
+                 NormalizedBBox* crop_bbox, bool* do_mirror, bool is_output_instance_mask);
   // Tranformation parameters
   TransformationParameter param_;
 

@@ -45,14 +45,10 @@ layer {
     }
   }
   data_param {
-    #source: "/home/amax/NiuChuang/data/VOCdevkit/VOC0712/lmdb/VOC0712_trainval_lmdb_test2"
-	source: "/media/amax/data2/MSCOCO/lmdb/coco2014_train_object_mask_lmdb"
-	batch_size: 8
+    source: "/media/amax/data2/MSCOCO/lmdb/coco2014_train_object_mask_lmdb"
+    batch_size: 48
     backend: LMDB
   }
-  #bbox_seg_data_param {
-  #    is_object_mask: true
-  #}
   bbox_seg_data_param {
     batch_sampler {
       max_sample: 1
@@ -69,7 +65,7 @@ layer {
         min_jaccard_overlap: 0.1
       }
       max_sample: 1
-      max_trials: 50
+      max_trials: 200
     }
     batch_sampler {
       sampler {
@@ -82,7 +78,7 @@ layer {
         min_jaccard_overlap: 0.3
       }
       max_sample: 1
-      max_trials: 50
+      max_trials: 200
     }
     batch_sampler {
       sampler {
@@ -95,7 +91,7 @@ layer {
         min_jaccard_overlap: 0.5
       }
       max_sample: 1
-      max_trials: 50
+      max_trials: 200
     }
     batch_sampler {
       sampler {
@@ -108,7 +104,7 @@ layer {
         min_jaccard_overlap: 0.7
       }
       max_sample: 1
-      max_trials: 50
+      max_trials: 200
     }
     batch_sampler {
       sampler {
@@ -121,7 +117,7 @@ layer {
         min_jaccard_overlap: 0.9
       }
       max_sample: 1
-      max_trials: 50
+      max_trials: 200
     }
     batch_sampler {
       sampler {
@@ -134,35 +130,20 @@ layer {
         max_jaccard_overlap: 1.0
       }
       max_sample: 1
-      max_trials: 50
+      max_trials: 200
     }
     label_map_file: "data/VOC0712/labelmap_voc.prototxt"
     is_object_mask: true
   }
 }
 layer {
-  name: "conv1_1"
-  type: "Convolution"
-  bottom: "data"
-  top: "conv1_1"
-  param {
-    lr_mult: 0
-    decay_mult: 0
-  }
-  param {
-    lr_mult: 0
-    decay_mult: 0
-  }
-  convolution_param {
-    num_output: 64
-    pad: 1
-    kernel_size: 3
-    weight_filler {
-      type: "xavier"
-    }
-    bias_filler {
-      type: "constant"
-      value: 0
-    }
+  name: "cls"
+  type: "GenerateClsVector"
+  bottom: "bbox"
+  top: "cls"
+  generate_cls_vector_param {
+    num_class: 80
+    batch_size: 48
+    background_label_id: 0
   }
 }

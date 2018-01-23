@@ -523,6 +523,7 @@ message LayerParameter {
   optional CropBBoxParameter crop_bbox_param = 210;
   optional UnpoolingParameter unpooling_param = 211;
   optional GenerateClsVectorParameter generate_cls_vector_param = 212;
+  optional PSROIParameter psroi_param = 213;
   optional ArgMaxParameter argmax_param = 103;
   optional BatchNormParameter batch_norm_param = 139;
   optional BiasParameter bias_param = 141;
@@ -803,6 +804,7 @@ message BBoxSegDataParameter {
   optional string label_map_file = 2;
 
   optional bool is_object_mask = 3 [default = false];
+  optional bool is_output_instance_mask = 4 [default = false];
 }
 
 message SelectBinaryParameter {
@@ -821,11 +823,18 @@ message GenerateClsVectorParameter {
   optional int32 background_label_id = 3;
 }
 
+message PSROIParameter {
+  optional int32 roi_size = 1;
+  optional int32 num_class = 2 [default = 1];
+}
+
 message CropBBoxParameter {
   // If ture, the object class, class specific bboxes and class specific object mask will be randomly selected.
   optional int32 background_label_id = 1 [default = 0];
   optional bool use_difficult_gt = 2 [default = true];
   optional bool is_crop_score_map = 3 [default = false];
+  optional bool is_crop_all = 4 [default = false];
+  optional bool is_crop_cls = 5 [default = false];
 }
 
 message UnpoolingParameter {

@@ -23,6 +23,8 @@ namespace caffe {
         background_label_id_ = crop_bbox_param.background_label_id();
         use_difficult_gt_ = crop_bbox_param.use_difficult_gt();
         is_crop_score_map_ = crop_bbox_param.is_crop_score_map();
+        is_crop_all_ = crop_bbox_param.is_crop_all();
+        is_crop_cls_ = crop_bbox_param.is_crop_cls();
     }
 
     template <typename Dtype>
@@ -33,10 +35,12 @@ namespace caffe {
             top[0]->Reshape(bottom_shape);
             mask_crop_.Reshape(bottom_shape);
         } else {
-            if (this->phase_ == TEST) {
-                CHECK_EQ(bottom_shape[0], 1) << "Current version only support 1 image in test stage!";
-                int num_bbox = bottom[1]->height();
-                bottom_shape[0] = num_bbox;
+            if (this->phase_ == TEST && (!is_crop_cls_)) {
+                if (!is_crop_all_) {
+                    CHECK_EQ(bottom_shape[0], 1) << "Current version only support 1 image in test stage!";
+                    int num_bbox = bottom[1]->height();
+                    bottom_shape[0] = num_bbox;
+                }
             }
             top[0]->Reshape(bottom_shape);
             mask_crop_.Reshape(bottom_shape);
@@ -79,7 +83,7 @@ namespace caffe {
 
         if (is_crop_score_map_){
 
-            NOT_IMPLEMENTED;
+            NOT_IMPLEMENTED; // Only implemented in .cu file.
 
         } else {
             // Retrieve all ground truth.
@@ -92,11 +96,11 @@ namespace caffe {
             }
             num_img_ = bottom[0]->num();
             CHECK_LE(all_gt_boxes_.size(), num_img_) << "Number of image with bbox must be less or equal to the number of image.";
-            if (this->phase_ == TRAIN) {
+            if (this->phase_ == TRAIN || is_crop_cls_) {
                 CHECK_LE(num_class_, num_img_) << "Current version only support one class at most selected for each image at train stage.";
             }
 
-            if (this->phase_ == TRAIN) {
+            if (this->phase_ == TRAIN || is_crop_cls_) {
 
                 // compute corp mask
                 caffe_set(mask_crop_.count(), Dtype(0), mask_crop_.mutable_cpu_data());
@@ -146,56 +150,60 @@ namespace caffe {
                 caffe_mul(top[0]->count(), bottom_data, mask_crop_.cpu_data(), top_data);
             } else {
                 // compute output at test stage.
-                caffe_set(mask_crop_.count(), Dtype(0), mask_crop_.mutable_cpu_data());
-                map<int, LabelBBox>::const_iterator iter_im;
-                int bbox_i = 0;
-                for (iter_im = all_gt_boxes_.begin(); iter_im != all_gt_boxes_.end(); ++iter_im) {
-                    img_id = iter_im->first;
-                    CHECK(img_id >= 0 && img_id < num_img_) << "img_id must be less than the number of images.";
-                    LabelBBox::iterator it;
-                    label_indices.clear();
-                    for (it = all_gt_boxes_[img_id].begin(); it != all_gt_boxes_[img_id].end(); it++) {
-                        label_indices.push_back(it->first);
-                    }
-                    int num_class_i = label_indices.size();
-                    for (int l = 0; l < num_class_i; ++l) {
-                        label = label_indices[l];
-                        vector<NormalizedBBox> bboxes = all_gt_boxes_[img_id][label];
-                        for (int b = 0; b < bboxes.size(); ++b) {
-                            xmin_norm = bboxes[b].xmin();
-                            ymin_norm = bboxes[b].ymin();
-                            xmax_norm = bboxes[b].xmax();
-                            ymax_norm = bboxes[b].ymax();
+                if (is_crop_all_) {
+                    NOT_IMPLEMENTED; // Only implemented in .cu file.
+                } else {
+                    caffe_set(mask_crop_.count(), Dtype(0), mask_crop_.mutable_cpu_data());
+                    map<int, LabelBBox>::const_iterator iter_im;
+                    int bbox_i = 0;
+                    for (iter_im = all_gt_boxes_.begin(); iter_im != all_gt_boxes_.end(); ++iter_im) {
+                        img_id = iter_im->first;
+                        CHECK(img_id >= 0 && img_id < num_img_) << "img_id must be less than the number of images.";
+                        LabelBBox::iterator it;
+                        label_indices.clear();
+                        for (it = all_gt_boxes_[img_id].begin(); it != all_gt_boxes_[img_id].end(); it++) {
+                            label_indices.push_back(it->first);
+                        }
+                        int num_class_i = label_indices.size();
+                        for (int l = 0; l < num_class_i; ++l) {
+                            label = label_indices[l];
+                            vector<NormalizedBBox> bboxes = all_gt_boxes_[img_id][label];
+                            for (int b = 0; b < bboxes.size(); ++b) {
+                                xmin_norm = bboxes[b].xmin();
+                                ymin_norm = bboxes[b].ymin();
+                                xmax_norm = bboxes[b].xmax();
+                                ymax_norm = bboxes[b].ymax();
 
-                            xmin = static_cast<int>(floor(xmin_norm * static_cast<Dtype>(width)));
-                            ymin = static_cast<int>(floor(ymin_norm * static_cast<Dtype>(height)));
-                            xmax = static_cast<int>(ceil(xmax_norm * static_cast<Dtype>(width)));
-                            ymax = static_cast<int>(ceil(ymax_norm * static_cast<Dtype>(height)));
+                                xmin = static_cast<int>(floor(xmin_norm * static_cast<Dtype>(width)));
+                                ymin = static_cast<int>(floor(ymin_norm * static_cast<Dtype>(height)));
+                                xmax = static_cast<int>(ceil(xmax_norm * static_cast<Dtype>(width)));
+                                ymax = static_cast<int>(ceil(ymax_norm * static_cast<Dtype>(height)));
 
-                            xmin = std::max(0, xmin);
-                            ymin = std::max(0, ymin);
-                            xmax = std::min(xmax, width);
-                            ymax = std::min(ymax, height);
+                                xmin = std::max(0, xmin);
+                                ymin = std::max(0, ymin);
+                                xmax = std::min(xmax, width);
+                                ymax = std::min(ymax, height);
 
-                            CHECK_LT(bbox_i, num_gt_) << "bbox_i must less than the number of bbox.";
-                            for (int c = 0; c < channels; ++c) {
-                                for (int h = ymin; h < ymax; ++h) {
-                                    for (int w = xmin; w < xmax; ++w) {
+                                CHECK_LT(bbox_i, num_gt_) << "bbox_i must less than the number of bbox.";
+                                for (int c = 0; c < channels; ++c) {
+                                    for (int h = ymin; h < ymax; ++h) {
+                                        for (int w = xmin; w < xmax; ++w) {
 
-                                        top_data[bbox_i * inner_dim + c * height * width + h * width + w] = bottom_data[
-                                                0 * inner_dim + c * height * width + h * width + w];
+                                            top_data[bbox_i * inner_dim + c * height * width + h * width +
+                                                     w] = bottom_data[
+                                                    0 * inner_dim + c * height * width + h * width + w];
+                                        }
                                     }
                                 }
-                            }
-                            bbox_i += 1;
+                                bbox_i += 1;
 
+                            }
                         }
                     }
                 }
             }
         }
 
-//        std::cout << "output shape: " << top_shape[0] << " " << top_shape[1] << " " << top_shape[2] << " " << top_shape[3] << std::endl;
     }
 
     template <typename Dtype>

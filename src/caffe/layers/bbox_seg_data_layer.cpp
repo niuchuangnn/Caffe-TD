@@ -95,7 +95,11 @@ namespace caffe {
         }
 
         // seg
+        bool is_output_instance_mask = bbox_seg_data_param.is_output_instance_mask();
         vector<int> seg_shape(top_shape);
+        if (is_output_instance_mask){
+            seg_shape[0] = num_bboxes;
+        }
         seg_shape[1] = 1;
         top[2]->Reshape(seg_shape);
         for (int i =0; i < this->PREFETCH_COUNT; ++i) {
@@ -126,7 +130,7 @@ namespace caffe {
         const TransformationParameter& transform_param =
                 this->layer_param_.transform_param();
         bool is_object_mask = bbox_seg_data_param.is_object_mask();
-
+        bool is_output_instance_mask = bbox_seg_data_param.is_output_instance_mask();
         BBoxSegDatum& bbox_seg_datum = *(reader_.full().peek());
 
         // Use data_transformer to infer the expected blob shape from anno_datum.
@@ -174,14 +178,14 @@ namespace caffe {
                                                       distort_datum.mutable_seg_datum());
                 if (transform_param.has_expand_param()) {
                     expand_datum = new BBoxSegDatum();
-                    this->data_transformer_->ExpandImage(distort_datum, expand_datum);
+                    this->data_transformer_->ExpandImage(distort_datum, expand_datum, is_output_instance_mask);
                 } else {
                     expand_datum = &distort_datum;
                 }
             } else {
                 if (transform_param.has_expand_param()) {
                     expand_datum = new BBoxSegDatum();
-                    this->data_transformer_->ExpandImage(bbox_seg_datum, expand_datum);
+                    this->data_transformer_->ExpandImage(bbox_seg_datum, expand_datum, is_output_instance_mask);
                 } else {
                     expand_datum = &bbox_seg_datum;
                 }
@@ -206,7 +210,7 @@ namespace caffe {
 
                     this->data_transformer_->CropImageSeg(*expand_datum,
                                                        sampled_bboxes[rand_idx],
-                                                       sampled_datum);
+                                                       sampled_datum, is_output_instance_mask);
 
                     if (is_object_mask && sampled_datum->annotation_group().size()>0){
                         this->data_transformer_->UpdateBinaryMask(sampled_datum->annotation_group().Get(0), sampled_datum->mutable_seg_datum());
@@ -265,8 +269,10 @@ namespace caffe {
             int offset_img = bbox_seg_batch->data_.offset(item_id);
             this->transformed_data_.set_cpu_data(top_data + offset_img);
 
-            int offset_seg = bbox_seg_batch->seg_.offset(item_id);
-            this->transformed_seg_.set_cpu_data(top_seg + offset_seg);
+            if (!is_output_instance_mask) {
+                int offset_seg = bbox_seg_batch->seg_.offset(item_id);
+                this->transformed_seg_.set_cpu_data(top_seg + offset_seg);
+            }
 
             vector<AnnotationGroup> transformed_anno_vec;
 
@@ -274,7 +280,7 @@ namespace caffe {
             transformed_anno_vec.clear();
             this->data_transformer_->Transform(*sampled_datum,
                                                &(this->transformed_data_), &(this->transformed_seg_),
-                                               &transformed_anno_vec);
+                                               &transformed_anno_vec, is_output_instance_mask);
 
             // Count the number of bboxes.
             for (int g = 0; g < transformed_anno_vec.size(); ++g) {
@@ -297,22 +303,41 @@ namespace caffe {
         }
 
         // Store bbox annotation.
+        // If is_output_instance_mask is true, output the instance mask.
         vector<int> label_shape(4);
-
         label_shape[0] = 1;
         label_shape[1] = 1;
         label_shape[3] = 8;
+        int height, width;
         if (num_bboxes == 0) {
             // Store all -1 in the label.
             label_shape[2] = 1;
             bbox_seg_batch->bbox_.Reshape(label_shape);
             caffe_set<Dtype>(8, -1, bbox_seg_batch->bbox_.mutable_cpu_data());
+            if (is_output_instance_mask) {
+                top_shape[0] = 1;
+                top_shape[1] = 1;
+                bbox_seg_batch->seg_.Reshape(top_shape);
+                caffe_set<Dtype>(bbox_seg_batch->seg_.count(), -1, bbox_seg_batch->seg_.mutable_cpu_data());
+            }
         } else {
             // Reshape the label and store the annotation.
             label_shape[2] = num_bboxes;
             bbox_seg_batch->bbox_.Reshape(label_shape);
             top_bbox = bbox_seg_batch->bbox_.mutable_cpu_data();
+
+            if (is_output_instance_mask) {
+                top_shape[0] = num_bboxes;
+                top_shape[1] = 1;
+                height = top_shape[2];
+                width = top_shape[3];
+                bbox_seg_batch->seg_.Reshape(top_shape);
+                top_seg = bbox_seg_batch->seg_.mutable_cpu_data();
+                caffe_set(bbox_seg_batch->seg_.count(), Dtype(255), top_seg);
+            }
+
             int idx = 0;
+            int bbox_id = 0;
             for (int item_id = 0; item_id < batch_size; ++item_id) {
                 const vector<AnnotationGroup>& anno_vec = all_anno[item_id];
                 for (int g = 0; g < anno_vec.size(); ++g) {
@@ -328,6 +353,34 @@ namespace caffe {
                         top_bbox[idx++] = bbox.xmax();
                         top_bbox[idx++] = bbox.ymax();
                         top_bbox[idx++] = bbox.difficult();
+
+                        if (is_output_instance_mask){
+                            int hstart = int(floor(bbox.ymin() * Dtype(height)));
+                            int hend = int(ceil(bbox.ymax() * Dtype(height)));
+                            int wstart = int(floor(bbox.xmin() * Dtype(width)));
+                            int wend = int(ceil(bbox.xmax() * Dtype(width)));
+                            cv::Mat cv_mask;
+                            const string& mask = anno.mask();
+                            std::vector<char> vec_data(mask.c_str(), mask.c_str() + mask.size());
+                            cv_mask = cv::imdecode(vec_data, -1);
+                            if (!cv_mask.data) {
+                                LOG(ERROR) << "Could not decode datum ";
+                            }
+
+                            double min_v, max_v;
+                            cv::minMaxLoc(cv_mask, &min_v, &max_v);
+                            CHECK_LE(max_v, 1) << "max label must be less than or equal to 1";
+//                            std::cout << "final cv_mask: " << min_v << " " << max_v << std::endl;
+
+                            for (int h = hstart; h < hend; ++h) {
+                                const uchar* ptr_seg = cv_mask.ptr<uchar>(h);
+                                for (int w = wstart; w < wend; ++w) {
+                                    Dtype pixel_seg = static_cast<Dtype>(ptr_seg[w]);
+                                    top_seg[bbox_id*height*width + h*width + w] = pixel_seg;
+                                }
+                            }
+                            bbox_id += 1;
+                        }
                     }
                 }
             }

@@ -378,7 +378,7 @@ def CreateAnnotatedDataLayer(source, batch_size=32, backend=P.Data.LMDB,
         ntop=ntop, **kwargs)
 
 def CreateBBoxDataLayer(source, batch_size=32, backend=P.Data.LMDB,
-        is_object_mask=True, train=True, label_map_file='', anno_type=None,
+        is_object_mask=True, is_output_instance_mask=False, train=True, label_map_file='', anno_type=None,
         transform_param={}, batch_sampler=[{}]):
     if train:
         kwargs = {
@@ -396,6 +396,7 @@ def CreateBBoxDataLayer(source, batch_size=32, backend=P.Data.LMDB,
         'label_map_file': label_map_file,
         'batch_sampler': batch_sampler,
         'is_object_mask': is_object_mask,
+        'is_output_instance_mask': is_output_instance_mask
         }
 
     return L.BBoxSegData(name="data", bbox_seg_data_param=bbox_seg_data_param,
@@ -664,8 +665,11 @@ def VGGNetBody(net, from_layer, need_fc=True, fully_conv=False, reduced=False,
     return net
 
 def DeVGGNetBody(net, from_layer, need_fc=True, fully_conv=False, reduced=False,
-        dilated=False, nopool=False, dropout=True, freeze_layers=[], dilate_pool4=False, pool_mask=False, is_object_mask=False, extra_crop_layers=[]):
+        dilated=False, nopool=False, dropout=True, freeze_layers=[], dilate_pool4=False,
+        pool_mask=False, is_object_mask=False, extra_crop_layers=[], is_crop_all=False,
+        is_crop_cls=False, is_crop_merge_feature=False):
     # mbox_source_layers = ['conv4_3', 'fc7', 'conv6_2', 'conv7_2', 'conv8_2', 'conv9_2']
+    # now the merge feature refers to 'conv4_3'
     if is_object_mask:
         bbox = 'bbox'
     else:
@@ -711,7 +715,7 @@ def DeVGGNetBody(net, from_layer, need_fc=True, fully_conv=False, reduced=False,
             # else:
             
             if "fc7" in extra_crop_layers:
-                net.fc7_crop = L.CropBBox(net.fc7, net[bbox])
+                net.fc7_crop = L.CropBBox(net.fc7, net[bbox], is_crop_all=is_crop_all, is_crop_cls=is_crop_cls)
                 net.defc7_concat = L.Concat(net.fc7_crop, net[from_layer])
             else:
                 net.defc7_concat = L.Concat(net.fc7, net[from_layer])
@@ -792,12 +796,17 @@ def DeVGGNetBody(net, from_layer, need_fc=True, fully_conv=False, reduced=False,
                 net[name] = L.Unpooling(net.derelu5_1, unpool=P.Unpooling.MAX, 
                                         kernel_size=2, stride=2, unpool_size=40)
     if "conv4_3" in extra_crop_layers:
-        net.conv4_3_crop = L.CropBBox(net.conv4_3, net[bbox])
+        net.conv4_3_crop = L.CropBBox(net.conv4_3, net[bbox], is_crop_all=is_crop_all, is_crop_cls=is_crop_cls)
         net.deconv4_3_concat = L.Concat(net.conv4_3_crop, net[name])
+        this_layer = 'deconv4_3_concat'
     else:
         net.deconv4_3_concat = L.Concat(net.conv4_3, net[name])
+        this_layer = 'deconv4_3_concat'
+        if is_crop_merge_feature:
+            net.deconv4_3_concat_crop = L.CropBBox(net.deconv4_3_concat, net[bbox], is_crop_score_map=True)
+            this_layer = 'deconv4_3_concat_crop' 
     
-    net.deconv4_3 = L.Deconvolution(net.deconv4_3_concat, convolution_param=dict(num_output=512, pad=1, kernel_size=3, **dekwargs), **deparam)
+    net.deconv4_3 = L.Deconvolution(net[this_layer], convolution_param=dict(num_output=512, pad=1, kernel_size=3, **dekwargs), **deparam)
     net.derelu4_3 = L.ReLU(net.deconv4_3, in_place=True)
     net.deconv4_2 = L.Deconvolution(net.derelu4_3, convolution_param=dict(num_output=512, pad=1, kernel_size=3, **dekwargs), **deparam)
     net.derelu4_2 = L.ReLU(net.deconv4_2, in_place=True)
@@ -818,7 +827,7 @@ def DeVGGNetBody(net, from_layer, need_fc=True, fully_conv=False, reduced=False,
                                     kernel_size=2, stride=2, unpool_size=80)
     
     if "conv3_3" in extra_crop_layers:
-        net.conv3_3_crop = L.CropBBox(net.conv3_3, net[bbox])
+        net.conv3_3_crop = L.CropBBox(net.conv3_3, net[bbox], is_crop_all=is_crop_all, is_crop_cls=is_crop_cls)
         net.deconv3_3_concat = L.Concat(net.conv3_3_crop, net[name])
     
         net.deconv3_3 = L.Deconvolution(net.deconv3_3_concat,
@@ -843,7 +852,7 @@ def DeVGGNetBody(net, from_layer, need_fc=True, fully_conv=False, reduced=False,
             net[name] = L.Unpooling(net.derelu3_1, unpool=P.Unpooling.MAX, kernel_size=2, stride=2, unpool_size=160)
 
     if "conv2_2" in extra_crop_layers:
-        net.conv2_2_crop = L.CropBBox(net.conv2_2, net[bbox])
+        net.conv2_2_crop = L.CropBBox(net.conv2_2, net[bbox], is_crop_all=is_crop_all, is_crop_cls=is_crop_cls)
         net.deconv2_2_concat = L.Concat(net.conv2_2_crop, net[name])
 
         net.deconv2_2 = L.Deconvolution(net.deconv2_2_concat,
@@ -870,7 +879,7 @@ def DeVGGNetBody(net, from_layer, need_fc=True, fully_conv=False, reduced=False,
             net[name] = L.Unpooling(net.relu1_2, unpool=P.Unpooling.MAX, kernel_size=2, stride=2, unpool_size=320)
     
     if "conv1_2" in extra_crop_layers:
-        net.conv1_2_crop = L.CropBBox(net.conv1_2, net[bbox])
+        net.conv1_2_crop = L.CropBBox(net.conv1_2, net[bbox], is_crop_all=is_crop_all, is_crop_cls=is_crop_cls)
         net.deconv1_2_concat = L.Concat(net.conv1_2_crop, net[name])
 
         net.deconv1_2 = L.Deconvolution(net.deconv1_2_concat,

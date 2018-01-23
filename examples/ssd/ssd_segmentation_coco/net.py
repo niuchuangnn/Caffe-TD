@@ -165,7 +165,8 @@ def AddExtraTopDownLayers(net, use_batchnorm=True, lr_mult=1, is_cls=False):
     return net
 
 
-def vgg16_ssd_detect_seg(source, label_map_file, batch_sampler, transform_param, use_batchnorm=False, is_detect=False, is_seg=True, is_cls=False):
+def vgg16_ssd_detect_seg(source, label_map_file, batch_sampler, transform_param, use_batchnorm=False, batch_size=6,
+                         is_detect=False, is_seg=True, is_cls=False, is_instance_aware=False, roi_size=None):
 
         if (is_detect or is_seg) == False:
             raise AssertionError('both is_detect and is_seg are set false!')
@@ -176,8 +177,9 @@ def vgg16_ssd_detect_seg(source, label_map_file, batch_sampler, transform_param,
         #         data_param=dict(batch_size=8, backend=P.Data.LMDB, source=source),
         #         ntop=3, **kwargs)
 
-        net.data, net.bbox, net.seg = CreateBBoxDataLayer(source, batch_size=8,
+        net.data, net.bbox, net.seg = CreateBBoxDataLayer(source, batch_size=batch_size,
                                                            train=True, is_object_mask=True,
+                                                           is_output_instance_mask=is_instance_aware,
                                                            label_map_file=label_map_file,
                                                            transform_param=transform_param,
                                                            batch_sampler=batch_sampler)
@@ -269,25 +271,29 @@ def vgg16_ssd_detect_seg(source, label_map_file, batch_sampler, transform_param,
 
         if is_seg:
             if is_cls:
-                net.cls_specific_bbox, net.binary_mask, net.cls = L.SelectBinary(net.bbox, net.seg, random_select=True,
-                                                                                 num_class=80, ntop=3)
-                net.__setattr__('cls_specific_bbox_silence', L.Silence(net.cls_specific_bbox, ntop=0))
-                net.__setattr__('binary_mask_silence', L.Silence(net.binary_mask, ntop=0))
+                net.cls = L.GenerateClsVector(net.bbox, batch_size=batch_size, num_class=80, background_label_id=0)
                 # class vector embedding deconvolution net for class-specific semantic segmentation
                 net.cls_reshape = L.Reshape(net.cls, shape=dict(dim=[0, 0, 1, 1]))
 
             # add top-down deconvolution net
             # mbox_source_layers = ['conv4_3', 'fc7', 'conv6_2', 'conv7_2', 'conv8_2', 'conv9_2']
-            AddExtraTopDownLayers(net, use_batchnorm=True, lr_mult=1)
+            AddExtraTopDownLayers(net, use_batchnorm=True, lr_mult=1, is_cls=is_cls)
 
             DeVGGNetBody(net, from_layer='deconv6_1', fully_conv=True, reduced=True, dilated=True,
-                         dropout=False, pool_mask=True, is_object_mask=True)
+                         dropout=False, pool_mask=True, is_object_mask=True, extra_crop_layers=["conv4_3"])
 
             dekwargs = {
                 'weight_filler': dict(type='xavier'),
                 'bias_filler': dict(type='constant', value=0)}
             deparam = {'param': [dict(lr_mult=1, decay_mult=1), dict(lr_mult=2, decay_mult=0)]}
-            net.seg_score = L.Deconvolution(net.derelu1_1, convolution_param=dict(num_output=2, pad=1, kernel_size=3, **dekwargs), **deparam)
+            if is_instance_aware:
+                num_instance_aware_map = 2 * roi_size * roi_size
+                net.seg_instance_score = L.Deconvolution(net.derelu1_1,
+                                         convolution_param=dict(num_output=num_instance_aware_map, pad=1,
+                                                                kernel_size=3, **dekwargs), **deparam)
+                net.seg_score = L.PSROI(net.seg_instance_score, net.bbox, num_class=1, roi_size=roi_size)
+            else:
+                net.seg_score = L.Deconvolution(net.derelu1_1, convolution_param=dict(num_output=2, pad=1, kernel_size=3, **dekwargs), **deparam)
 
             net.seg_loss = L.SoftmaxWithLoss(net.seg_score, net.seg, loss_param=dict(ignore_label=255))
 
@@ -430,6 +436,9 @@ if __name__ == "__main__":
                 'batch_sampler': batch_sampler,
         }
         source = "/media/amax/data2/MSCOCO/MS_COCO_2017/lmdb/coco2017_train_object_mask_lmdb"
-
-        with open("vgg16_ssd_seg.prototxt", 'w') as f:
-            f.write(str(vgg16_ssd_detect_seg(source, label_map_file, batch_sampler, transform_param, is_detect=False)))
+        is_instance_aware = True
+        roi_size = 5
+        is_cls = True
+        with open("vgg16_ssd_seg_instance_aware.prototxt", 'w') as f:
+            f.write(str(vgg16_ssd_detect_seg(source, label_map_file, batch_sampler, transform_param,
+                                             is_detect=False, is_instance_aware=is_instance_aware, roi_size=roi_size, is_cls=is_cls)))

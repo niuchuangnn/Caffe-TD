@@ -17,7 +17,7 @@ if(HAVE_CUDA)
   list(APPEND srcs ${cuda_objs} ${cuda})
 endif()
 
-add_library(caffe ${srcs} layers/bbox_seg_data_layer.cpp layers/bbox_seg_prefetching.cpp layers/bbox_seg_prefetching.cu layers/select_binary_layer.cpp layers/crop_bbox_layer.cpp layers/unpooling_layer.cpp layers/generate_cls_vector_layer.cpp layers/crop_bbox_layer.cu)
+add_library(caffe ${srcs} layers/bbox_seg_data_layer.cpp layers/bbox_seg_prefetching.cpp layers/bbox_seg_prefetching.cu layers/select_binary_layer.cpp layers/crop_bbox_layer.cpp layers/unpooling_layer.cpp layers/generate_cls_vector_layer.cpp layers/crop_bbox_layer.cu layers/psroi_layer.cpp layers/psroi_layer.cu)
 target_link_libraries(caffe proto ${Caffe_LINKER_LIBS})
 caffe_default_properties(caffe)
 set_target_properties(caffe PROPERTIES

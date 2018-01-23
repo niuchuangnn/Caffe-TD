@@ -214,6 +214,37 @@ class CaffeDetectionSegmentation:
 
         return seg_prob
 
+    def seg_crop_all(self, bbox, image_file, key_type='name'):
+
+        self.net.blobs['data'].reshape(1, 3, self.image_resize, self.image_resize)
+        image = caffe.io.load_image(image_file)
+
+        im_shape = image.shape
+        self.im_shape = im_shape
+
+        # Run the net and examine the top_k results
+        transformed_image = self.transformer.preprocess('data', image)
+
+        self.net.blobs['data'].reshape(1, 3, self.image_resize, self.image_resize)
+
+        self.net.blobs['data'].data[...] = transformed_image
+
+        self.net.blobs['cls_specific_bbox'].reshape(1, 1, bbox.shape[2], 8)
+        bbox[:, :, :, 0] = 0
+        self.net.blobs['cls_specific_bbox'].data[...] = bbox
+
+        # Forward pass.
+        seg_prob_blob = self.net.forward()['seg_prob']
+
+        if True:
+            plt.figure(1)
+            plt.imshow(image)
+            plt.figure(2)
+            plt.imshow(imresize(seg_prob_blob[0, 1], [im_shape[0], im_shape[1]]))
+            plt.show()
+
+        return seg_prob
+
     def merge_seg_prob(self, seg_prob, bbox, all_diff_labels):
         mask = np.zeros((self.im_shape[0], self.im_shape[1], len(seg_prob)+1))
         bbox_margin = self.bbox_margin
@@ -233,7 +264,7 @@ class CaffeDetectionSegmentation:
                     ymax = min(self.im_shape[0], ymax + bbox_margin)
                     seg[np.where(seg < self.thresh)] = 0
                     mask[ymin:ymax, xmin:xmax, all_diff_labels.index(label)+1] = seg[ymin:ymax, xmin:xmax]
-        if False:
+        if True:
             fig_id = 111
             for i in range(len(all_diff_labels)):
                 plt.figure(fig_id+i)
@@ -303,7 +334,7 @@ class CaffeDetectionSegmentation:
                     # seg_mask_c[np.where(seg_label == 255)] = 0
                     intersection_class_compare[idx_c-1] += len(np.argwhere((seg_anno_c * seg_mask_c) > 0))
                     union_class_compare[idx_c-1] += len(np.argwhere((seg_anno_c + seg_mask_c) > 0))
-                if False:
+                if True:
                     plt.figure(1)
                     plt.imshow(im)
                     ax = plt.gca()
@@ -360,6 +391,8 @@ def main(args):
     print detect_result
 
     bbox, all_diff_cls_labels = detection_seg.detect2bbox(detect_result)
+
+    # detection_seg.seg_crop_all(bbox, args.image_file)
 
     seg_prob = detection_seg.seg(bbox, all_diff_cls_labels, args.image_file, key_type='label')
 
@@ -421,18 +454,18 @@ def main(args):
 def parse_args():
     '''parse args'''
     parser = argparse.ArgumentParser()
-    parser.add_argument('--gpu_id', type=int, default=0, help='gpu id')
+    parser.add_argument('--gpu_id', type=int, default=3, help='gpu id')
     parser.add_argument('--bbox_margin', type=int, default=5, help='bbox margin')
     parser.add_argument('--thresh', type=float, default=0.2, help='thresh')
     parser.add_argument('--labelmap_file',
                         default='data/VOC0712/labelmap_voc.prototxt')
     parser.add_argument('--model_def',
-                        default='examples/ssd/ssd_segmentation/deploy_noclass_extra3_3.prototxt')
+                        default='examples/ssd/ssd_segmentation/deploy_crop_all.prototxt')
     parser.add_argument('--image_resize', default=320, type=int)
     parser.add_argument('--model_weights_detection',
                         default='/media/amax/data2/ssd/SSD_320x320/VGG_VOC0712_SSD_320x320_iter_120000.caffemodel')
     parser.add_argument('--model_weights_segmentation',
-                        default='/media/amax/data2/ssd_seg/vgg16_noclass_extra3_3_iter_30000.caffemodel')
+                        default='/media/amax/data2/ssd_seg/vgg16_noclass_iter_26000.caffemodel')
     parser.add_argument('--image_file', default='/home/amax/NiuChuang/data/VOCdevkit/VOC2012/JPEGImages/2009_002894.jpg')
     parser.add_argument('--test_file', default='/home/amax/NiuChuang/fcn.berkeleyvision.org/data/pascal/2012/VOCdevkit/VOC2012/ImageSets/Segmentation/val.txt')
     parser.add_argument('--image_folder', default='/home/amax/NiuChuang/data/VOCdevkit/VOC2012/JPEGImages/')

@@ -57,6 +57,7 @@ cv::Mat ApplyResize(const cv::Mat& in_img, const ResizeParameter& param);
     int min_label(int label, vector<int> mask_labels);
     void ApplyResize(const cv::Mat& in_img, const cv::Mat& in_seg, const ResizeParameter& param,
                      cv::Mat* out_img, cv::Mat* out_seg);
+    void ApplyMaskResize(const cv::Mat& in_seg, const ResizeParameter& param, cv::Mat* out_seg);
 
 cv::Mat ApplyNoise(const cv::Mat& in_img, const NoiseParameter& param);
 

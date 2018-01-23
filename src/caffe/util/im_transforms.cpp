@@ -558,6 +558,24 @@ cv::Mat ApplyResize(const cv::Mat& in_img, const ResizeParameter& param) {
       }
     }
 
+
+    void ApplyMaskResize(const cv::Mat& in_seg, const ResizeParameter& param, cv::Mat* out_seg){
+        // Reading parameters
+        const int new_height = param.height();
+        const int new_width = param.width();
+        vector<int> mask_labels;
+        switch (param.resize_mode()) {
+            case ResizeParameter_Resize_mode_WARP:
+                cv::resize(in_seg, *out_seg, cv::Size(new_width, new_height), 0, 0, cv::INTER_NEAREST);
+                unique_mask_labels(in_seg, &mask_labels);
+                // change mask labels
+                change_mask_labels(out_seg, mask_labels);
+                break;
+            default:
+                LOG(INFO) << "Unknown resize mode.";
+        }
+    }
+
 cv::Mat ApplyNoise(const cv::Mat& in_img, const NoiseParameter& param) {
   cv::Mat out_img;
 

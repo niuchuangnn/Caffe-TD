@@ -62,7 +62,7 @@ if __name__ == "__main__":
     transformer.set_raw_scale('data', 255)  # the reference model operates on images in [0,255] range instead of [0,1]
     transformer.set_channel_swap('data', (2, 1, 0))  # the reference model has channels in BGR order instead of RGB
 
-    labelmap_file = '../../../data/VOC0712/labelmap_voc.prototxt'
+    labelmap_file = '/home/amax/NiuChuang/SSD/caffe-ssd/data/coco/labelmap_coco.prototxt'
     file = open(labelmap_file, 'r')
     labelmap = caffe_pb2.LabelMap()
     text_format.Merge(str(file.read()), labelmap)
@@ -70,7 +70,7 @@ if __name__ == "__main__":
     plt.rcParams['figure.figsize'] = (10, 10)
     plt.rcParams['image.interpolation'] = 'nearest'
 
-    colors = plt.cm.hsv(np.linspace(0, 1, 21)).tolist()
+    colors = plt.cm.hsv(np.linspace(0, 1, 81)).tolist()
 
     img_blob = net.blobs['data'].data
     num_imgs = img_blob.shape[0]
@@ -84,8 +84,8 @@ if __name__ == "__main__":
     color_map = np.random.random_integers(0, 256, [256, 3]).astype(np.uint8)
 
     select_cls = net.blobs['cls'].data
-    cls_specific_bbox = net.blobs['cls_specific_bbox'].data[0, 0, :, :]
-    binary_mask = net.blobs['binary_mask'].data
+    cls_specific_bbox = net.blobs['bbox'].data[0, 0, :, :]
+    binary_mask = net.blobs['seg'].data
     num_selected_bbox = cls_specific_bbox.shape[0]
 
     # visualize class specific bboxes, binary mask

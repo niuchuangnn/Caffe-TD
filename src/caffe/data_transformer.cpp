@@ -315,7 +315,7 @@ void DataTransformer<Dtype>::Transform(const Datum& datum,
     void DataTransformer<Dtype>::Transform(const SegDatum& seg_datum,
                                            Blob<Dtype>* transformed_img, Blob<Dtype>* transformed_seg,
                                            NormalizedBBox* crop_bbox,
-                                           bool* do_mirror) {
+                                           bool* do_mirror, bool is_output_instance_mask) {
         // If datum is encoded, decoded and transform the cv::image.
         if (seg_datum.encoded()) {
 #ifdef USE_OPENCV
@@ -337,7 +337,7 @@ void DataTransformer<Dtype>::Transform(const Datum& datum,
                 }
             }
 
-            if (is_mask) {
+            if (is_mask && (!is_output_instance_mask)) {
                 return Transform(cv_img, cv_seg, transformed_img, transformed_seg, crop_bbox, do_mirror);
             } else {
                 // Transform the cv::image into blob.
@@ -400,16 +400,21 @@ void DataTransformer<Dtype>::Transform(
     void DataTransformer<Dtype>::Transform(
             const BBoxSegDatum& bbox_seg_datum, Blob<Dtype>* transformed_img, Blob<Dtype>* transformed_seg,
             RepeatedPtrField<AnnotationGroup>* transformed_anno_group_all,
-            bool* do_mirror) {
+            bool* do_mirror, bool is_output_instance_mask) {
         // Transform datum.
         const SegDatum& seg_datum = bbox_seg_datum.seg_datum();
         NormalizedBBox crop_bbox;
-        Transform(seg_datum, transformed_img, transformed_seg, &crop_bbox, do_mirror);
+        Transform(seg_datum, transformed_img, transformed_seg, &crop_bbox, do_mirror, is_output_instance_mask);
 
         // Transform annotation.
         const bool do_resize = true;
-        TransformAnnotation(bbox_seg_datum, do_resize, crop_bbox, *do_mirror,
-                            transformed_anno_group_all);
+        if (is_output_instance_mask){
+            TransformResizeMaskAnnotation(bbox_seg_datum, do_resize, crop_bbox, *do_mirror,
+                                transformed_anno_group_all);
+        } else {
+            TransformAnnotation(bbox_seg_datum, do_resize, crop_bbox, *do_mirror,
+                                transformed_anno_group_all);
+        }
     }
 
 template<typename Dtype>
@@ -424,10 +429,10 @@ void DataTransformer<Dtype>::Transform(
     template<typename Dtype>
     void DataTransformer<Dtype>::Transform(
             const BBoxSegDatum& bbox_seg_datum, Blob<Dtype>* transformed_img, Blob<Dtype>* transformed_seg,
-            RepeatedPtrField<AnnotationGroup>* transformed_anno_group_all) {
+            RepeatedPtrField<AnnotationGroup>* transformed_anno_group_all, bool is_output_instance_mask) {
         bool do_mirror;
         Transform(bbox_seg_datum, transformed_img, transformed_seg, transformed_anno_group_all,
-                  &do_mirror);
+                  &do_mirror, is_output_instance_mask);
     }
 
 template<typename Dtype>
@@ -445,10 +450,10 @@ void DataTransformer<Dtype>::Transform(
     template<typename Dtype>
     void DataTransformer<Dtype>::Transform(
             const BBoxSegDatum& bbox_seg_datum, Blob<Dtype>* transformed_img, Blob<Dtype>* transformed_seg,
-            vector<AnnotationGroup>* transformed_anno_vec, bool* do_mirror) {
+            vector<AnnotationGroup>* transformed_anno_vec, bool* do_mirror, bool is_output_instance_mask) {
         RepeatedPtrField<AnnotationGroup> transformed_anno_group_all;
         Transform(bbox_seg_datum, transformed_img, transformed_seg, &transformed_anno_group_all,
-                  do_mirror);
+                  do_mirror, is_output_instance_mask);
         for (int g = 0; g < transformed_anno_group_all.size(); ++g) {
             transformed_anno_vec->push_back(transformed_anno_group_all.Get(g));
         }
@@ -465,9 +470,9 @@ void DataTransformer<Dtype>::Transform(
     template<typename Dtype>
     void DataTransformer<Dtype>::Transform(
             const BBoxSegDatum& bbox_seg_datum, Blob<Dtype>* transformed_img, Blob<Dtype>* transformed_seg,
-            vector<AnnotationGroup>* transformed_anno_vec) {
+            vector<AnnotationGroup>* transformed_anno_vec, bool is_output_instance_mask) {
         bool do_mirror;
-        Transform(bbox_seg_datum, transformed_img, transformed_seg, transformed_anno_vec, &do_mirror);
+        Transform(bbox_seg_datum, transformed_img, transformed_seg, transformed_anno_vec, &do_mirror, is_output_instance_mask);
     }
 
 template<typename Dtype>
@@ -589,7 +594,306 @@ void DataTransformer<Dtype>::TransformAnnotation(
     }
 
 
-template<typename Dtype>
+    template<typename Dtype>
+    void DataTransformer<Dtype>::TransformMaskAnnotation(
+            const BBoxSegDatum& bbox_seg_datum, const bool do_resize,
+            const NormalizedBBox& crop_bbox, const bool do_mirror, const float expand_ratio,
+            RepeatedPtrField<AnnotationGroup>* transformed_anno_group_all) {
+        const int img_height = bbox_seg_datum.seg_datum().height();
+        const int img_width = bbox_seg_datum.seg_datum().width();
+
+        // Go through each AnnotationGroup.
+        for (int g = 0; g < bbox_seg_datum.annotation_group_size(); ++g) {
+            const AnnotationGroup& anno_group = bbox_seg_datum.annotation_group(g);
+            AnnotationGroup transformed_anno_group;
+            // Go through each Annotation.
+            bool has_valid_annotation = false;
+            for (int a = 0; a < anno_group.annotation_size(); ++a) {
+                const Annotation& anno = anno_group.annotation(a);
+                const NormalizedBBox& bbox = anno.bbox();
+                // Adjust bounding box annotation.
+                NormalizedBBox resize_bbox = bbox;
+                if (do_resize && param_.has_resize_param()) {
+                    CHECK_GT(img_height, 0);
+                    CHECK_GT(img_width, 0);
+                    UpdateBBoxByResizePolicy(param_.resize_param(), img_width, img_height,
+                                             &resize_bbox);
+                }
+                if (param_.has_emit_constraint() &&
+                    !MeetEmitConstraint(crop_bbox, resize_bbox,
+                                        param_.emit_constraint())) {
+                    continue;
+                }
+                NormalizedBBox proj_bbox;
+                if (ProjectBBox(crop_bbox, resize_bbox, &proj_bbox)) {
+                    has_valid_annotation = true;
+                    Annotation* transformed_anno =
+                            transformed_anno_group.add_annotation();
+                    transformed_anno->set_instance_id(anno.instance_id());
+                    NormalizedBBox* transformed_bbox = transformed_anno->mutable_bbox();
+                    transformed_bbox->CopyFrom(proj_bbox);
+                    if (do_mirror) {
+                        Dtype temp = transformed_bbox->xmin();
+                        transformed_bbox->set_xmin(1 - transformed_bbox->xmax());
+                        transformed_bbox->set_xmax(1 - temp);
+                    }
+                    if (do_resize && param_.has_resize_param()) {
+                        ExtrapolateBBox(param_.resize_param(), img_height, img_width,
+                                        crop_bbox, transformed_bbox);
+                    }
+
+                    cv::Mat cv_mask;
+                    const string& mask = anno.mask();
+                    std::vector<char> vec_data(mask.c_str(), mask.c_str() + mask.size());
+                    cv_mask = cv::imdecode(vec_data, -1);
+                    if (!cv_mask.data) {
+                        LOG(ERROR) << "Could not decode datum ";
+                    }
+
+//                    double min_v, max_v;
+//                    cv::minMaxLoc(cv_mask, &min_v, &max_v);
+//                    std::cout << "expand cv_mask: " << min_v << " " << max_v << std::endl;
+
+                    // Expand the image.
+                    cv::Mat expand_mask;
+
+                    const int w_off = int(round(-crop_bbox.xmin() * Dtype(img_width)));
+                    const int h_off = int(round(-crop_bbox.ymin() * Dtype(img_height)));
+                    const int expand_width = int(round(crop_bbox.xmax() * Dtype(img_width)) + w_off);
+                    const int expand_height = int(round(crop_bbox.ymax() * Dtype(img_height)) + h_off);
+
+                    expand_mask.create(expand_height, expand_width, cv_mask.type());
+                    expand_mask.setTo(cv::Scalar(0));
+
+
+//                    std::cout << "w_of: " << w_off << std::endl;
+//                    std::cout << "h_off: " << h_off << std::endl;
+//                    std::cout << "expand_width: " << expand_width << std::endl;
+//                    std::cout << "expand_height: " << expand_height << std::endl;
+//                    std::cout << "img_width: " << img_width << std::endl;
+//                    std::cout << "img_height: " << img_height << std::endl;
+                    cv::Rect bbox_roi(w_off, h_off, img_width, img_height);
+                    cv_mask.copyTo((expand_mask)(bbox_roi));
+
+//                    cv::minMaxLoc(expand_mask, &min_v, &max_v);
+//                    std::cout << "expand cv_mask_expand: " << min_v << " " << max_v << std::endl;
+
+                    // Save the image into transformed annotation.
+                    std::vector<uchar> buf;
+                    cv::imencode(".png", expand_mask, buf);
+                    transformed_anno->set_mask(std::string(reinterpret_cast<char*>(&buf[0]),
+                                                    buf.size()));
+
+                }
+            }
+            // Save for output.
+            if (has_valid_annotation) {
+                transformed_anno_group.set_group_label(anno_group.group_label());
+                transformed_anno_group_all->Add()->CopyFrom(transformed_anno_group);
+            }
+        }
+
+    }
+
+
+    template<typename Dtype>
+    void DataTransformer<Dtype>::TransformCropMaskAnnotation(
+            const BBoxSegDatum& bbox_seg_datum, const bool do_resize,
+            const NormalizedBBox& crop_bbox, const bool do_mirror,
+            RepeatedPtrField<AnnotationGroup>* transformed_anno_group_all) {
+        const int img_height = bbox_seg_datum.seg_datum().height();
+        const int img_width = bbox_seg_datum.seg_datum().width();
+
+        // Go through each AnnotationGroup.
+        for (int g = 0; g < bbox_seg_datum.annotation_group_size(); ++g) {
+            const AnnotationGroup& anno_group = bbox_seg_datum.annotation_group(g);
+            AnnotationGroup transformed_anno_group;
+            // Go through each Annotation.
+            bool has_valid_annotation = false;
+            for (int a = 0; a < anno_group.annotation_size(); ++a) {
+                const Annotation& anno = anno_group.annotation(a);
+                const NormalizedBBox& bbox = anno.bbox();
+                // Adjust bounding box annotation.
+                NormalizedBBox resize_bbox = bbox;
+                if (do_resize && param_.has_resize_param()) {
+                    CHECK_GT(img_height, 0);
+                    CHECK_GT(img_width, 0);
+                    UpdateBBoxByResizePolicy(param_.resize_param(), img_width, img_height,
+                                             &resize_bbox);
+                }
+                if (param_.has_emit_constraint() &&
+                    !MeetEmitConstraint(crop_bbox, resize_bbox,
+                                        param_.emit_constraint())) {
+                    continue;
+                }
+                NormalizedBBox proj_bbox;
+                if (ProjectBBox(crop_bbox, resize_bbox, &proj_bbox)) {
+                    has_valid_annotation = true;
+                    Annotation* transformed_anno =
+                            transformed_anno_group.add_annotation();
+                    transformed_anno->set_instance_id(anno.instance_id());
+                    NormalizedBBox* transformed_bbox = transformed_anno->mutable_bbox();
+                    transformed_bbox->CopyFrom(proj_bbox);
+                    if (do_mirror) {
+                        Dtype temp = transformed_bbox->xmin();
+                        transformed_bbox->set_xmin(1 - transformed_bbox->xmax());
+                        transformed_bbox->set_xmax(1 - temp);
+                    }
+                    if (do_resize && param_.has_resize_param()) {
+                        ExtrapolateBBox(param_.resize_param(), img_height, img_width,
+                                        crop_bbox, transformed_bbox);
+                    }
+
+                    cv::Mat cv_mask;
+                    const string& mask = anno.mask();
+                    std::vector<char> vec_data(mask.c_str(), mask.c_str() + mask.size());
+                    cv_mask = cv::imdecode(vec_data, -1);
+                    if (!cv_mask.data) {
+                        LOG(ERROR) << "Could not decode datum ";
+                    }
+
+//                    double min_v, max_v;
+//                    cv::minMaxLoc(cv_mask, &min_v, &max_v);
+//                    std::cout << "crop cv_mask: " << min_v << " " << max_v << std::endl;
+
+                    // Crop the image.
+                    cv::Mat crop_mask;
+                    CropImage(cv_mask, crop_bbox, &crop_mask);
+
+//                    cv::minMaxLoc(crop_mask, &min_v, &max_v);
+//                    std::cout << "crop cv_mask_crop: " << min_v << " " << max_v << std::endl;
+
+                    // Save the image into transformed annotation.
+                    std::vector<uchar> buf;
+                    cv::imencode(".png", crop_mask, buf);
+                    transformed_anno->set_mask(std::string(reinterpret_cast<char*>(&buf[0]),
+                                                           buf.size()));
+
+                }
+            }
+            // Save for output.
+            if (has_valid_annotation) {
+                transformed_anno_group.set_group_label(anno_group.group_label());
+                transformed_anno_group_all->Add()->CopyFrom(transformed_anno_group);
+            }
+        }
+
+    }
+
+
+
+    template<typename Dtype>
+    void DataTransformer<Dtype>::TransformResizeMaskAnnotation(
+            const BBoxSegDatum& bbox_seg_datum, const bool do_resize,
+            const NormalizedBBox& crop_bbox, const bool do_mirror,
+            RepeatedPtrField<AnnotationGroup>* transformed_anno_group_all) {
+        const int img_height = bbox_seg_datum.seg_datum().height();
+        const int img_width = bbox_seg_datum.seg_datum().width();
+
+        // Go through each AnnotationGroup.
+        for (int g = 0; g < bbox_seg_datum.annotation_group_size(); ++g) {
+            const AnnotationGroup& anno_group = bbox_seg_datum.annotation_group(g);
+            AnnotationGroup transformed_anno_group;
+            // Go through each Annotation.
+            bool has_valid_annotation = false;
+            for (int a = 0; a < anno_group.annotation_size(); ++a) {
+                const Annotation& anno = anno_group.annotation(a);
+                const NormalizedBBox& bbox = anno.bbox();
+                // Adjust bounding box annotation.
+                NormalizedBBox resize_bbox = bbox;
+                if (do_resize && param_.has_resize_param()) {
+                    CHECK_GT(img_height, 0);
+                    CHECK_GT(img_width, 0);
+                    UpdateBBoxByResizePolicy(param_.resize_param(), img_width, img_height,
+                                             &resize_bbox);
+                }
+                if (param_.has_emit_constraint() &&
+                    !MeetEmitConstraint(crop_bbox, resize_bbox,
+                                        param_.emit_constraint())) {
+                    continue;
+                }
+                NormalizedBBox proj_bbox;
+                if (ProjectBBox(crop_bbox, resize_bbox, &proj_bbox)) {
+                    has_valid_annotation = true;
+                    Annotation* transformed_anno =
+                            transformed_anno_group.add_annotation();
+                    transformed_anno->set_instance_id(anno.instance_id());
+                    NormalizedBBox* transformed_bbox = transformed_anno->mutable_bbox();
+                    transformed_bbox->CopyFrom(proj_bbox);
+                    if (do_mirror) {
+                        Dtype temp = transformed_bbox->xmin();
+                        transformed_bbox->set_xmin(1 - transformed_bbox->xmax());
+                        transformed_bbox->set_xmax(1 - temp);
+                    }
+                    if (do_resize && param_.has_resize_param()) {
+                        ExtrapolateBBox(param_.resize_param(), img_height, img_width,
+                                        crop_bbox, transformed_bbox);
+                    }
+
+                    cv::Mat cv_mask;
+                    const string& mask = anno.mask();
+                    std::vector<char> vec_data(mask.c_str(), mask.c_str() + mask.size());
+                    cv_mask = cv::imdecode(vec_data, -1);
+                    if (!cv_mask.data) {
+                        LOG(ERROR) << "Could not decode datum ";
+                    }
+
+//                    double min_v, max_v;
+//                    cv::minMaxLoc(cv_mask, &min_v, &max_v);
+//                    std::cout << "crop cv_mask: " << min_v << " " << max_v << std::endl;
+
+                    // Resize the image.
+
+                    cv::Mat cv_resized_mask, cv_cropped_mask;
+                    if (param_.has_resize_param()) {
+//            cv_resized_image = ApplyResize(cv_img, param_.resize_param());
+                        ApplyMaskResize(cv_mask, param_.resize_param(), &cv_resized_mask);
+                    } else {
+                        cv_resized_mask = cv_mask;
+                    }
+
+//                    cv::minMaxLoc(cv_resized_mask, &min_v, &max_v);
+//                    std::cout << "crop cv_mask_resized: " << min_v << " " << max_v << std::endl;
+
+                    int resized_height = cv_resized_mask.rows;
+                    int resized_width = cv_resized_mask.cols;
+
+                    int h_off = int(round(Dtype(resized_height) * crop_bbox.ymin()));
+                    int w_off = int(round(Dtype(resized_width) * crop_bbox.xmin()));
+                    int crop_w = int(round(Dtype(resized_width) * crop_bbox.xmax()) - w_off);
+                    int crop_h = int(round(Dtype(resized_height) * crop_bbox.ymax()) - h_off);
+                    cv::Rect roi(w_off, h_off, crop_w, crop_h);
+                    cv_cropped_mask = cv_resized_mask(roi);
+
+                    cv::Mat cv_flip_mask;
+                    if (do_mirror){
+                        cv::flip(cv_cropped_mask, cv_flip_mask, 1);
+                    } else {
+                        cv_flip_mask = cv_cropped_mask;
+                    }
+
+//                    cv::minMaxLoc(cv_flip_mask, &min_v, &max_v);
+//                    std::cout << "crop cv_mask_flip: " << min_v << " " << max_v << std::endl;
+
+                    // Save the image into transformed annotation.
+                    std::vector<uchar> buf;
+                    cv::imencode(".png", cv_flip_mask, buf);
+                    transformed_anno->set_mask(std::string(reinterpret_cast<char*>(&buf[0]),
+                                                           buf.size()));
+
+                }
+            }
+            // Save for output.
+            if (has_valid_annotation) {
+                transformed_anno_group.set_group_label(anno_group.group_label());
+                transformed_anno_group_all->Add()->CopyFrom(transformed_anno_group);
+            }
+        }
+
+    }
+
+
+    template<typename Dtype>
 void DataTransformer<Dtype>::CropImage(const Datum& datum,
                                        const NormalizedBBox& bbox,
                                        Datum* crop_datum) {
@@ -773,7 +1077,7 @@ void DataTransformer<Dtype>::CropImage(const AnnotatedDatum& anno_datum,
     template<typename Dtype>
     void DataTransformer<Dtype>::CropImageSeg(const BBoxSegDatum& bbox_seg_datum,
                                            const NormalizedBBox& bbox,
-                                           BBoxSegDatum* cropped_bbox_seg_datum) {
+                                           BBoxSegDatum* cropped_bbox_seg_datum, bool is_output_instance_mask) {
         // Crop the datum.
         CropImageSeg(bbox_seg_datum.seg_datum(), bbox, cropped_bbox_seg_datum->mutable_seg_datum());
 //        cropped_anno_datum->set_type(anno_datum.type());
@@ -783,8 +1087,14 @@ void DataTransformer<Dtype>::CropImage(const AnnotatedDatum& anno_datum,
         const bool do_mirror = false;
         NormalizedBBox crop_bbox;
         ClipBBox(bbox, &crop_bbox);
-        TransformAnnotation(bbox_seg_datum, do_resize, crop_bbox, do_mirror,
-                            cropped_bbox_seg_datum->mutable_annotation_group());
+
+        if (is_output_instance_mask){
+            TransformCropMaskAnnotation(bbox_seg_datum, do_resize, crop_bbox, do_mirror,
+                                cropped_bbox_seg_datum->mutable_annotation_group());
+        } else {
+            TransformAnnotation(bbox_seg_datum, do_resize, crop_bbox, do_mirror,
+                                cropped_bbox_seg_datum->mutable_annotation_group());
+        }
     }
 
 template<typename Dtype>
@@ -911,7 +1221,7 @@ void DataTransformer<Dtype>::ExpandImage(const Datum& datum,
 
 template<typename Dtype>
 void DataTransformer<Dtype>::ExpandImage(const BBoxSegDatum& bbox_seg_datum,
-                                         BBoxSegDatum* expanded_bbox_seg_datum) {
+                                         BBoxSegDatum* expanded_bbox_seg_datum, bool is_output_instance_mask) {
   if (!param_.has_expand_param()) {
     expanded_bbox_seg_datum->CopyFrom(bbox_seg_datum);
     return;
@@ -940,8 +1250,13 @@ void DataTransformer<Dtype>::ExpandImage(const BBoxSegDatum& bbox_seg_datum,
   // Transform the annotation according to crop_bbox.
   const bool do_resize = false;
   const bool do_mirror = false;
-  TransformAnnotation(bbox_seg_datum, do_resize, expand_bbox, do_mirror,
-                      expanded_bbox_seg_datum->mutable_annotation_group());
+  if (is_output_instance_mask){
+      TransformMaskAnnotation(bbox_seg_datum, do_resize, expand_bbox, do_mirror, expand_ratio,
+                          expanded_bbox_seg_datum->mutable_annotation_group());
+  }  else {
+      TransformAnnotation(bbox_seg_datum, do_resize, expand_bbox, do_mirror,
+                          expanded_bbox_seg_datum->mutable_annotation_group());
+  }
 }
 
     template<typename Dtype>

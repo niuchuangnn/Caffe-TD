@@ -24,7 +24,7 @@ if __name__ == "__main__":
     # solver = caffe.SGDSolver(solver_def)
     #
     # solver.solve()
-    resume = True
+    resume = False
     pwd = '/home/amax/NiuChuang/SSD/caffe-ssd/examples/ssd/ssd_segmentation_coco/'
     job_file = 'train.sh'
     solver_file = 'solver.prototxt'

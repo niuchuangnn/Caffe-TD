@@ -112,7 +112,7 @@ void CropBBoxLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
 
 	} else {
 		const Dtype* gt_data = bottom[1]->gpu_data();
-		if (this->phase_ == TRAIN) {
+		if (this->phase_ == TRAIN || is_crop_cls_) {
 	//  	        	std::cout << "gpu" << std::endl;
 			// Retrieve all ground truth.
 			GetGroundTruth(bottom[1]->cpu_data(), num_gt_, background_label_id_,
@@ -129,7 +129,7 @@ void CropBBoxLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
 				num_class_ += all_gt_boxes_[i].size();
 			}
 
-			if (this->phase_ == TRAIN) {
+			if (this->phase_ == TRAIN || is_crop_cls_) {
 				CHECK_LE(num_class_, num_img_)
 						<< "Current version only support one class at most selected for each image at train stage.";
 			}
@@ -189,10 +189,46 @@ void CropBBoxLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
 			caffe_gpu_mul(top[0]->count(), bottom_data, mask_crop_.gpu_data(),
 					top_data);
 		} else {
-	//		std::cout << "gpu" << std::endl;
-			// compute output at test stage.
-			copy_bbox_data_kernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS>>>(
-					N, channels, height, width, gt_data, bottom_data, top_data);
+			if (is_crop_all_){
+				caffe_gpu_set(mask_crop_.count(), Dtype(0),
+						mask_crop_.mutable_gpu_data());
+				mask_data = mask_crop_.mutable_gpu_data();
+				const Dtype* gt_data = bottom[1]->cpu_data();
+
+				for (int b = 0; b < num_gt_; ++b) {
+					img_id = gt_data[b * 8 + 0];
+					mask_data = mask_crop_.mutable_gpu_data() + img_id * inner_dim;
+					xmin_norm = gt_data[b * 8 + 3];
+					ymin_norm = gt_data[b * 8 + 4];
+					xmax_norm = gt_data[b * 8 + 5];
+					ymax_norm = gt_data[b * 8 + 6];
+					xmin = static_cast<int>(floor(
+							xmin_norm * static_cast<Dtype>(width)));
+					ymin = static_cast<int>(floor(
+							ymin_norm * static_cast<Dtype>(height)));
+					xmax = static_cast<int>(ceil(
+							xmax_norm * static_cast<Dtype>(width)));
+					ymax = static_cast<int>(ceil(
+							ymax_norm * static_cast<Dtype>(height)));
+
+					xmin = std::max(0, xmin);
+					ymin = std::max(0, ymin);
+					xmax = std::min(xmax, width);
+					ymax = std::min(ymax, height);
+
+					set_mask_kernel<<<CAFFE_GET_BLOCKS(inner_dim),
+							CAFFE_CUDA_NUM_THREADS>>>(inner_dim, height, width, ymin,
+							ymax, xmin, xmax, mask_data);
+
+				}
+				// crop the bottom data to top blob with crop mask.
+				caffe_gpu_mul(top[0]->count(), bottom_data, mask_crop_.gpu_data(), top_data);
+
+			} else {
+					// compute output at test stage.
+					copy_bbox_data_kernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS>>>(
+							N, channels, height, width, gt_data, bottom_data, top_data);
+			}
 
 		}
 	}

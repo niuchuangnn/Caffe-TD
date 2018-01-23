@@ -54,6 +54,8 @@ namespace caffe {
         int background_label_id_;
         bool use_difficult_gt_;
         bool is_crop_score_map_;
+        bool is_crop_all_;
+        bool is_crop_cls_;
         int num_class_;
         int num_img_;
         Blob<Dtype> mask_crop_;

@@ -24,12 +24,12 @@ if __name__ == "__main__":
     # solver = caffe.SGDSolver(solver_def)
     #
     # solver.solve()
-    resume = False
+    resume = True
     pwd = '/home/amax/NiuChuang/SSD/caffe-ssd/examples/ssd/ssd_segmentation/'
     job_file = 'train.sh'
     solver_file = 'solver_noclass.prototxt'
     ssd_model = '/media/amax/data2/ssd/SSD_320x320/VGG_VOC0712_SSD_320x320_iter_120000.caffemodel'
-    ssd_solver_state = '/media/amax/data2/ssd_seg/vgg16_noclass_extra3_3_iter_23099.solverstate'
+    ssd_solver_state = '/media/amax/data2/ssd_seg/vgg16_noclass_crop4_3_iter_28000.solverstate'
     if resume:
         train_src_param = '--snapshot="{}" \\\n'.format(ssd_solver_state)
     else:

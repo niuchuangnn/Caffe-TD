@@ -70,7 +70,8 @@ def AddExtraLayers(net, use_batchnorm=True, lr_mult=1):
 
     return net
 
-def AddExtraTopDownLayers(net, use_batchnorm=True, lr_mult=1, crop_layers=['conv6_2', 'conv7_2', 'conv8_2', 'conv9_2'], is_cls=False):
+def AddExtraTopDownLayers(net, use_batchnorm=True, lr_mult=1, crop_layers=['conv6_2', 'conv7_2', 'conv8_2', 'conv9_2'], is_cls=False,
+                          is_crop_all=False, is_crop_cls=False):
     # mbox_source_layers = ['conv4_3', 'fc7', 'conv6_2', 'conv7_2', 'conv8_2', 'conv9_2']
     bbox = "cls_specific_bbox"
 
@@ -88,7 +89,7 @@ def AddExtraTopDownLayers(net, use_batchnorm=True, lr_mult=1, crop_layers=['conv
 
     if from_layer in crop_layers:
         out_layer = "conv9_2_crop"
-        net[out_layer] = L.CropBBox(net[from_layer], net[bbox])
+        net[out_layer] = L.CropBBox(net[from_layer], net[bbox], is_crop_all=is_crop_all, is_crop_cls=is_crop_cls)
     else:
         out_layer = "conv9_2"
 
@@ -113,7 +114,7 @@ def AddExtraTopDownLayers(net, use_batchnorm=True, lr_mult=1, crop_layers=['conv
 
     if from_layer in crop_layers:
         out_layer = "conv8_2_crop"
-        net[out_layer] = L.CropBBox(net[from_layer], net[bbox])
+        net[out_layer] = L.CropBBox(net[from_layer], net[bbox], is_crop_all=is_crop_all, is_crop_cls=is_crop_cls)
     else:
         out_layer = from_layer
 
@@ -137,7 +138,7 @@ def AddExtraTopDownLayers(net, use_batchnorm=True, lr_mult=1, crop_layers=['conv
     from_layer = "conv7_2"
     if from_layer in crop_layers:
         out_layer = "conv7_2_crop"
-        net[out_layer] = L.CropBBox(net[from_layer], net[bbox])
+        net[out_layer] = L.CropBBox(net[from_layer], net[bbox], is_crop_all=is_crop_all, is_crop_cls=is_crop_cls)
     else:
         out_layer = from_layer
 
@@ -161,7 +162,7 @@ def AddExtraTopDownLayers(net, use_batchnorm=True, lr_mult=1, crop_layers=['conv
     from_layer = "conv6_2"
     if from_layer in crop_layers:
         out_layer = "conv6_2_crop"
-        net[out_layer] = L.CropBBox(net[from_layer], net[bbox])
+        net[out_layer] = L.CropBBox(net[from_layer], net[bbox], is_crop_all=is_crop_all, is_crop_cls=is_crop_cls)
     else:
         out_layer = from_layer
 
@@ -184,36 +185,143 @@ def AddExtraTopDownLayers(net, use_batchnorm=True, lr_mult=1, crop_layers=['conv
     return net
 
 
-def vgg16_ssd_seg(source, bbox_seg_data_param, kwargs, use_batchnorm=False, lr_mult=1,
-                  crop_layers=[], is_crop_last=False, is_cls=False):
+def vgg16_ssd_seg(source, bbox_seg_data_param, kwargs, use_batchnorm=False, lr_mult=1, crop_layers=[],
+                  is_crop_last=False, is_cls=False, is_deploy=False, is_crop_all=False,
+                  is_crop_cls=False, is_crop_merge_feature=False):
 
         if crop_layers is None:
             crop_layers = ['conv4_3', 'fc7', 'conv6_2', 'conv7_2', 'conv8_2', 'conv9_2']
         net = caffe.NetSpec()
+        if is_deploy:
+            net.data = L.Input(input_param=dict(shape=dict(dim=[1, 3, 320, 320])))
+            net.cls_specific_bbox = L.Input(input_param=dict(shape=dict(dim=[1, 1, 1, 8])))
+            if is_cls:
+                net.cls = L.Input(input_param=dict(shape=dict(dim=[1, 20])))
+        else:
+            net.data, net.bbox, net.seg = L.BBoxSegData(name="data", annotated_data_param=bbox_seg_data_param,
+                    data_param=dict(batch_size=8, backend=P.Data.LMDB, source=source),
+                    ntop=3, **kwargs)
 
-        net.data, net.bbox, net.seg = L.BBoxSegData(name="data", annotated_data_param=bbox_seg_data_param,
-                data_param=dict(batch_size=8, backend=P.Data.LMDB, source=source),
-                ntop=3, **kwargs)
-
-        net.cls_specific_bbox, net.binary_mask, net.cls = L.SelectBinary(net.bbox, net.seg, random_select=True, num_class=20, ntop=3)
+            net.cls_specific_bbox, net.binary_mask, net.cls = L.SelectBinary(net.bbox, net.seg, random_select=True, num_class=20, ntop=3)
 
         VGGNetBody(net, from_layer='data', fully_conv=True, reduced=True, dilated=True,
                    dropout=False, pool_mask=True, freeze_all=True)
 
         AddExtraLayers(net, use_batchnorm, lr_mult=0)
 
+        if is_deploy:
+            # MultiBoxLoss parameters.
+            num_classes = 21
+            share_location = True
+            background_label_id = 0
+            train_on_diff_gt = True
+            normalization_mode = P.Loss.VALID
+            code_type = P.PriorBox.CENTER_SIZE
+            ignore_cross_boundary_bbox = False
+            mining_type = P.MultiBoxLoss.MAX_NEGATIVE
+            neg_pos_ratio = 3.
+            loc_weight = (neg_pos_ratio + 1.) / 4.
+            multibox_loss_param = {
+                'loc_loss_type': P.MultiBoxLoss.SMOOTH_L1,
+                'conf_loss_type': P.MultiBoxLoss.SOFTMAX,
+                'loc_weight': loc_weight,
+                'num_classes': num_classes,
+                'share_location': share_location,
+                'match_type': P.MultiBoxLoss.PER_PREDICTION,
+                'overlap_threshold': 0.5,
+                'use_prior_for_matching': True,
+                'background_label_id': background_label_id,
+                'use_difficult_gt': train_on_diff_gt,
+                'mining_type': mining_type,
+                'neg_pos_ratio': neg_pos_ratio,
+                'neg_overlap': 0.5,
+                'code_type': code_type,
+                'ignore_cross_boundary_bbox': ignore_cross_boundary_bbox,
+            }
+
+            # parameters for generating priors.
+            # minimum dimension of input image
+            min_dim = 320
+            # conv4_3 ==> 38 x 38
+            # fc7 ==> 19 x 19
+            # conv6_2 ==> 10 x 10
+            # conv7_2 ==> 5 x 5
+            # conv8_2 ==> 3 x 3
+            # conv9_2 ==> 1 x 1
+            mbox_source_layers = ['conv4_3', 'fc7', 'conv6_2', 'conv7_2', 'conv8_2', 'conv9_2']
+            # in percent %
+            min_ratio = 20
+            max_ratio = 90
+            step = int(math.floor((max_ratio - min_ratio) / (len(mbox_source_layers) - 2)))
+            min_sizes = []
+            max_sizes = []
+            for ratio in xrange(min_ratio, max_ratio + 1, step):
+                min_sizes.append(min_dim * ratio / 100.)
+                max_sizes.append(min_dim * (ratio + step) / 100.)
+            min_sizes = [min_dim * 10 / 100.] + min_sizes
+            max_sizes = [min_dim * 20 / 100.] + max_sizes
+            steps = [8, 16, 32, 64, 100, 320]
+            aspect_ratios = [[2], [2, 3], [2, 3], [2, 3], [2], [2]]
+            # L2 normalize conv4_3.
+            normalizations = [20, -1, -1, -1, -1, -1]
+            # variance used to encode/decode prior bboxes.
+            if code_type == P.PriorBox.CENTER_SIZE:
+                prior_variance = [0.1, 0.1, 0.2, 0.2]
+            else:
+                prior_variance = [0.1]
+            flip = True
+            clip = False
+
+            # parameters for generating detection output.
+            det_out_param = {
+                'num_classes': num_classes,
+                'share_location': share_location,
+                'background_label_id': background_label_id,
+                'nms_param': {'nms_threshold': 0.45, 'top_k': 400},
+                'keep_top_k': 200,
+                'confidence_threshold': 0.01,
+                'code_type': code_type,
+            }
+
+            mbox_layers = CreateMultiBoxHead(net, data_layer='data', from_layers=mbox_source_layers,
+                                             use_batchnorm=use_batchnorm, min_sizes=min_sizes, max_sizes=max_sizes,
+                                             aspect_ratios=aspect_ratios, steps=steps, normalizations=normalizations,
+                                             num_classes=num_classes, share_location=share_location, flip=flip,
+                                             clip=clip,
+                                             prior_variance=prior_variance, kernel_size=3, pad=1, lr_mult=lr_mult)
+
+            conf_name = "mbox_conf"
+            if multibox_loss_param["conf_loss_type"] == P.MultiBoxLoss.SOFTMAX:
+                reshape_name = "{}_reshape".format(conf_name)
+                net[reshape_name] = L.Reshape(net[conf_name], shape=dict(dim=[0, -1, num_classes]))
+                softmax_name = "{}_softmax".format(conf_name)
+                net[softmax_name] = L.Softmax(net[reshape_name], axis=2)
+                flatten_name = "{}_flatten".format(conf_name)
+                net[flatten_name] = L.Flatten(net[softmax_name], axis=1)
+                mbox_layers[1] = net[flatten_name]
+            elif multibox_loss_param["conf_loss_type"] == P.MultiBoxLoss.LOGISTIC:
+                sigmoid_name = "{}_sigmoid".format(conf_name)
+                net[sigmoid_name] = L.Sigmoid(net[conf_name])
+                mbox_layers[1] = net[sigmoid_name]
+
+            net.detection_out = L.DetectionOutput(*mbox_layers,
+                                                  detection_output_param=det_out_param,
+                                                  include=dict(phase=caffe_pb2.Phase.Value('TEST')))
+
         if not is_cls:
-            net.__setattr__('cls_silence', L.Silence(net.cls, ntop=0))
+            if not is_deploy:
+                net.__setattr__('cls_silence', L.Silence(net.cls, ntop=0))
         else:
             # class vector embedding deconvolution net for class-specific semantic segmentation
             net.cls_reshape = L.Reshape(net.cls, shape=dict(dim=[0, 0, 1, 1]))
 
         # add top-down deconvolution net
         # mbox_source_layers = ['conv4_3', 'fc7', 'conv6_2', 'conv7_2', 'conv8_2', 'conv9_2']
-        AddExtraTopDownLayers(net, use_batchnorm=True, lr_mult=1, crop_layers=crop_layers, is_cls=is_cls)
+        AddExtraTopDownLayers(net, use_batchnorm=True, lr_mult=1, crop_layers=crop_layers, is_cls=is_cls, is_crop_all=is_crop_all, is_crop_cls=is_crop_cls)
 
         DeVGGNetBody(net, from_layer='deconv6_1', fully_conv=True, reduced=True, dilated=True,
-                     dropout=False, pool_mask=True, extra_crop_layers=crop_layers)
+                     dropout=False, pool_mask=True, extra_crop_layers=crop_layers, is_crop_all=is_crop_all,
+                     is_crop_cls=is_crop_cls, is_crop_merge_feature=is_crop_merge_feature)
 
         dekwargs = {
             'weight_filler': dict(type='xavier'),
@@ -227,7 +335,10 @@ def vgg16_ssd_seg(source, bbox_seg_data_param, kwargs, use_batchnorm=False, lr_m
         else:
             out_layer = "seg_score"
 
-        net.seg_loss = L.SoftmaxWithLoss(net[out_layer], net.binary_mask, loss_param=dict(ignore_label=255))
+        if is_deploy:
+            net.seg_prob = L.Softmax(net[out_layer])
+        else:
+            net.seg_loss = L.SoftmaxWithLoss(net[out_layer], net.binary_mask, loss_param=dict(ignore_label=255))
 
         return net.to_proto()
 
@@ -368,6 +479,17 @@ if __name__ == "__main__":
                 'batch_sampler': batch_sampler,
         }
         source = "/home/amax/NiuChuang/data/VOCdevkit/VOC0712/lmdb/VOC0712_trainval_lmdb_test2"
+        # crop_layers = ["conv4_3", "fc7", "conv6_2", "conv7_2", "conv8_2",  "conv9_2"]
         crop_layers = []
-        with open("vgg16_ssd_seg_crop_last.prototxt", 'w') as f:
-            f.write(str(vgg16_ssd_seg(source, bbox_seg_data_param, kwargs, crop_layers=crop_layers, is_crop_last=True, is_cls=True)))
+        is_deploy = False
+        is_crop_all = False
+        is_crop_cls = False
+        is_crop_last = False
+        is_cls = False
+        is_crop_merge_feature = True
+        save_file = "vgg16_ssd_seg_noclass_crop_merge_feature.prototxt"  # "vgg16_ssd_seg_crop_last.prototxt"
+        with open(save_file, 'w') as f:
+            f.write(str(vgg16_ssd_seg(source, bbox_seg_data_param, kwargs, crop_layers=crop_layers,
+                                      is_crop_last=is_crop_last, is_cls=is_cls, is_deploy=is_deploy,
+                                      is_crop_all=is_crop_all, is_crop_cls=is_crop_cls,
+                                      is_crop_merge_feature=is_crop_merge_feature)))
